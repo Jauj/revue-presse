@@ -1,0 +1,35 @@
+name = "revue-presse"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# === CRON TRIGGERS (3 phases espacées de 2 min) ===
+# Phase 1 - FETCH : 07h00 CET → Récupération RSS + extraction articles
+# Phase 2 - ANALYZE : 07h02 CET → Analyse IA des articles extraits
+# Phase 3 - DELIVER : 07h04 CET → Envoi de la revue par email
+[triggers]
+crons = ["0 6 * * 1-5", "2 6 * * 1-5", "4 6 * * 1-5"]
+
+# === KV Namespace (cache inter-phases) ===
+# Créer avec : npm run kv:create
+# Remplacer l'ID ci-dessous par celui retourné
+[[kv_namespaces]]
+binding = "CACHE"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# === Variables d'environnement (non secrètes) ===
+[vars]
+DESTINATION_EMAIL = "votre@email.com"
+# Heure du fuseau pour l'affichage (Europe/Paris)
+TIMEZONE = "Europe/Paris"
+# Nombre max d'articles à traiter
+MAX_ARTICLES = 25
+# Nombre max de mots par article extraits
+MAX_WORDS_PER_ARTICLE = 1500
+# Provider IA préféré : "groq" | "mistral" | "workersai"
+AI_PROVIDER = "groq"
+
+# === Workers AI (fallback natif, optionnel) ===
+# Décommenter pour activer le fallback Cloudflare Workers AI
+# [ai]
+# binding = "AI"
