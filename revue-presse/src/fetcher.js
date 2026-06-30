@@ -173,78 +173,57 @@ export async function fetchAllFeeds(maxArticles) {
 
 /**
  * Fetch un article complet avec headers anti-paywall
- * Stratégie : Googlebot UA → Facebookbot UA → r.jina.ai
+ * VERSION OPTIMISÉE : stratégie unique pour économiser les sous-requêtes
+ * - hasFullContent → Googlebot UA (une seule requête)
+ * - Sinon → r.jina.ai directement (une seule requête, fiable)
  */
-export async function fetchFullArticle(url, sourceName = '') {
-  let html = null;
-  let method = 'none';
+export async function fetchFullArticle(url, hasFullContent = false) {
+  // === Si la source RSS a déjà du contenu, essayer Googlebot pour plus ===
+  if (hasFullContent) {
+    try {
+      const resp = await fetch(url, {
+        headers: { ...ANTI_PAYWALL_HEADERS },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (resp.ok) {
+        const html = await resp.text();
+        if (html.length > 500) {
+          return { html, method: 'googlebot', isMarkdown: false, success: true };
+        }
+      }
+    } catch (e) { /* skip */ }
+  }
 
-  // === Stratégie 1 : Headers Googlebot ===
+  // === Stratégie principale : r.jina.ai (1 seule requête, très fiable) ===
+  try {
+    const resp = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
+      headers: {
+        'Accept': 'text/plain',
+        'X-Return-Format': 'text',
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (resp.ok) {
+      const text = await resp.text();
+      if (text.length > 200) {
+        return { text, method: 'jina', isMarkdown: true, success: true };
+      }
+    }
+  } catch (e) { /* skip */ }
+
+  // === Dernier recours : Googlebot direct ===
   try {
     const resp = await fetch(url, {
       headers: { ...ANTI_PAYWALL_HEADERS },
       signal: AbortSignal.timeout(15000),
     });
     if (resp.ok) {
-      html = await resp.text();
-      method = 'googlebot';
-    }
-  } catch (e) {
-    // Passer à la stratégie suivante
-  }
-
-  // === Stratégie 2 : Headers Facebookbot (si le contenu semble tronqué) ===
-  if (!html || html.length < 1000) {
-    try {
-      const resp = await fetch(url, {
-        headers: { ...ALT_HEADERS_FACEBOOK },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (resp.ok) {
-        const fbHtml = await resp.text();
-        if (fbHtml.length > html?.length) {
-          html = fbHtml;
-          method = 'facebookbot';
-        }
+      const html = await resp.text();
+      if (html.length > 500) {
+        return { html, method: 'googlebot', isMarkdown: false, success: true };
       }
-    } catch (e) {
-      // Passer à la stratégie suivante
     }
-  }
+  } catch (e) { /* skip */ }
 
-  // === Stratégie 3 : Fallback r.jina.ai ===
-  if (!html || html.length < 1000) {
-    try {
-      const resp = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
-        headers: {
-          'Accept': 'text/plain',
-          'X-Return-Format': 'text',
-        },
-        signal: AbortSignal.timeout(20000),
-      });
-      if (resp.ok) {
-        const jinaText = await resp.text();
-        // r.jina.ai retourne du Markdown propre → marquer comme déjà extrait
-        return {
-          text: jinaText,
-          method: 'jina',
-          isMarkdown: true,
-          success: true,
-        };
-      }
-    } catch (e) {
-      // Dernier recours
-    }
-  }
-
-  if (!html) {
-    return { text: null, method: 'failed', success: false };
-  }
-
-  return {
-    html,
-    method,
-    isMarkdown: false,
-    success: true,
-  };
+  return { text: null, method: 'failed', success: false };
 }

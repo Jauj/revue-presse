@@ -1,11 +1,14 @@
 // ============================================================
 // ai.js — Appels IA avec gestion du quota et fallbacks
-// Providers : Groq (préféré) → Mistral → Workers AI (dernier recours)
+// Providers : Gemini (préféré) → Groq → Mistral → Workers AI (dernier recours)
 // Prompts optimisés : Smart Brevity (Axios) + Chain of Density
 // ============================================================
 
+const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const CEREBRAS_ENDPOINT = 'https://api.cerebras.ai/v1/chat/completions';
 
 // ============================================================
 // SYSTEM PROMPT — Rédacteur en chef avec méthode Smart Brevity
@@ -109,12 +112,18 @@ export async function generatePressReview(articles, env) {
 
   // Essayer chaque provider dans l'ordre
   const providers = getProviders(env, provider);
+  let lastError = 'unknown';
+  let allErrors = [];
 
   for (const p of providers) {
     try {
       let result;
       if (p.name === 'WorkersAI') {
         result = await callWorkersAI(env, SYSTEM_PROMPT, userContent);
+      } else if (p.name === 'Gemini') {
+        result = await callGemini(p.apiKey, SYSTEM_PROMPT, userContent);
+      } else if (p.name === 'OpenRouter') {
+        result = await callAI(p.endpoint, p.model, p.apiKey, SYSTEM_PROMPT, userContent);
       } else {
         result = await callAI(p.endpoint, p.model, p.apiKey, SYSTEM_PROMPT, userContent);
       }
@@ -125,7 +134,10 @@ export async function generatePressReview(articles, env) {
         success: true,
       };
     } catch (err) {
+      const errMsg = `${p.name}: ${err.message}`;
       console.error(`Provider ${p.name} échoué: ${err.message}`);
+      lastError = errMsg;
+      allErrors.push(errMsg);
     }
   }
 
@@ -136,6 +148,8 @@ export async function generatePressReview(articles, env) {
     model: 'none',
     success: true,
     isFallback: true,
+    lastError,
+    allErrors,
   };
 }
 
@@ -155,63 +169,40 @@ function buildStructuredPrompt(articles) {
   prompt += `Produis la revue de presse à partir des ${articles.length} articles ci-dessous. `;
   prompt += `Les articles sont en français et en anglais. Traite-les tous.\n\n`;
 
-  if (totalWords > 15000) {
-    // Mode économie : extraits structurés pour économiser les tokens
-    prompt += `MODE : Articles compressés (titres + extraits clés).\n\n`;
-    prompt += `<articles>\n`;
-    for (let i = 0; i < articles.length; i++) {
-      const a = articles[i];
-      const text = a.extractedText || a.description || '(indisponible)';
-      // Extraire les 800 premiers mots pour le mode compressé
-      const excerpt = text.split(/\s+/).slice(0, 800).join(' ');
-      prompt += `<article id="${i + 1}">\n`;
-      prompt += `<source>${a.sourceName}</source>\n`;
-      prompt += `<lang>${a.sourceLang || 'fr'}</lang>\n`;
-      prompt += `<category>${a.sourceCategory || 'autre'}</category>\n`;
-      prompt += `<title>${a.title}</title>\n`;
-      if (a.author) prompt += `<author>${a.author}</author>\n`;
-      prompt += `<content>\n${excerpt}\n</content>\n`;
-      if (a.link) prompt += `<url>${a.link}</url>\n`;
-      prompt += `</article>\n\n`;
-    }
-    prompt += `</articles>\n`;
-  } else {
-    // Mode complet : articles intégraux
-    prompt += `MODE : Articles intégraux.\n\n`;
-    prompt += `<articles>\n`;
-    for (let i = 0; i < articles.length; i++) {
-      const a = articles[i];
-      const text = a.extractedText || a.description || '(indisponible)';
-      // Tronquer à 2000 mots max par article
-      const truncated = text.split(/\s+/).slice(0, 2000).join(' ');
-      prompt += `<article id="${i + 1}">\n`;
-      prompt += `<source>${a.sourceName}</source>\n`;
-      prompt += `<lang>${a.sourceLang || 'fr'}</lang>\n`;
-      prompt += `<category>${a.sourceCategory || 'autre'}</category>\n`;
-      prompt += `<title>${a.title}</title>\n`;
-      if (a.author) prompt += `<author>${a.author}</author>\n`;
-      prompt += `<content>\n${truncated}\n</content>\n`;
-      if (a.link) prompt += `<url>${a.link}</url>\n`;
-      prompt += `</article>\n\n`;
-    }
-    prompt += `</articles>\n`;
+  // TOUJOURS utiliser le mode compressé pour Workers AI (contexte limité)
+  prompt += `MODE : Articles compressés (titres + extraits clés).\n\n`;
+  prompt += `<articles>\n`;
+  for (let i = 0; i < articles.length; i++) {
+    const a = articles[i];
+    const text = a.extractedText || a.description || '(indisponible)';
+    // Extraire les 300 premiers mots pour économiser les tokens
+    const excerpt = text.split(/\s+/).slice(0, 300).join(' ');
+    prompt += `<article id="${i + 1}">\n`;
+    prompt += `<source>${a.sourceName}</source>\n`;
+    prompt += `<lang>${a.sourceLang || 'fr'}</lang>\n`;
+    prompt += `<category>${a.sourceCategory || 'autre'}</category>\n`;
+    prompt += `<title>${a.title}</title>\n`;
+    prompt += `<content>\n${excerpt}\n</content>\n`;
+    if (a.link) prompt += `<url>${a.link}</url>\n`;
+    prompt += `</article>\n\n`;
   }
+  prompt += `</articles>\n`;
 
-  // Rappel des consignes clés (mise en avant pour éviter "lost in the middle")
+  // Rappel des consignes clés
   prompt += `\n## RAPPEL\n`;
   prompt += `- Groupe par THÈME (pas par source)\n`;
   prompt += `- Chaque thème : bold axiom + 2-3 points clés attribués + "Pourquoi c'est important"\n`;
   prompt += `- Section "Divergence" si les sources se contredisent\n`;
   prompt += `- Section "Tendances" avec angles manquants\n`;
   prompt += `- Section "À surveiller" (prochaines évolutions)\n`;
-  prompt += `- Maximum 5-7 thèmes\n`;
+  prompt += `- Maximum 5 thèmes\n`;
   prompt += `- Résumé en français, titres originaux conservés\n`;
 
   return prompt;
 }
 
 /**
- * Appelle l'API d'un provider LLM (format OpenAI-compatible)
+ * Appelle l'API d'un provider LLM (format OpenAI-compatible : Groq, Mistral)
  */
 async function callAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
   const response = await fetch(endpoint, {
@@ -230,7 +221,7 @@ async function callAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
       max_tokens: 8000,
       top_p: 0.9,
     }),
-    signal: AbortSignal.timeout(120000), // 120s timeout (revues longues)
+    signal: AbortSignal.timeout(120000),
   });
 
   if (!response.ok) {
@@ -243,6 +234,43 @@ async function callAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
 }
 
 /**
+ * Appelle Google Gemini (format API natif Gemini)
+ * Gemini 2.0 Flash : 1500 requêtes/jour gratuit, contexte 1M tokens
+ */
+async function callGemini(apiKey, systemPrompt, userPrompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.25,
+        maxOutputTokens: 8000,
+        topP: 0.9,
+      },
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Gemini HTTP ${response.status}: ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini: pas de contenu dans la réponse');
+  return text;
+}
+
+/**
  * Appelle Workers AI (Cloudflare natif) comme dernier recours
  */
 async function callWorkersAI(env, systemPrompt, userPrompt) {
@@ -250,18 +278,32 @@ async function callWorkersAI(env, systemPrompt, userPrompt) {
     throw new Error('Workers AI binding non configuré');
   }
 
-  const combined = `${systemPrompt}\n\n${userPrompt}`;
+  // Combiner le prompt système et utilisateur
+  const combined = `${systemPrompt}\n\n---\n\n${userPrompt}`;
 
-  const response = await env.AI.run(
+  // Essayer d'abord avec un modèle plus performant, puis fallback
+  const models = [
+    '@cf/meta/llama-3.3-70b-instruct',
     '@cf/meta/llama-3.1-8b-instruct',
-    {
-      prompt: combined,
-      max_tokens: 4000,
-      temperature: 0.25,
-    }
-  );
+  ];
 
-  return response.response;
+  for (const model of models) {
+    try {
+      const response = await env.AI.run(model, {
+        prompt: combined,
+        max_tokens: 6000,
+        temperature: 0.25,
+      });
+
+      if (response.response && response.response.length > 100) {
+        return response.response;
+      }
+    } catch (e) {
+      console.error(`Workers AI modèle ${model} échoué: ${e.message}`);
+    }
+  }
+
+  throw new Error('Workers AI: tous les modèles ont échoué');
 }
 
 /**
@@ -270,55 +312,35 @@ async function callWorkersAI(env, systemPrompt, userPrompt) {
 function getProviders(env, preferred) {
   const providers = [];
 
-  if (preferred === 'groq' && env.GROQ_API_KEY) {
-    providers.push({
-      name: 'Groq',
-      endpoint: GROQ_ENDPOINT,
-      model: 'llama-3.3-70b-versatile',
-      apiKey: env.GROQ_API_KEY,
-    });
+  // Provider préféré
+  if (preferred === 'gemini' && env.GEMINI_API_KEY) {
+    providers.push({ name: 'Gemini', endpoint: null, model: 'gemini-2.0-flash', apiKey: env.GEMINI_API_KEY });
+  } else if (preferred === 'groq' && env.GROQ_API_KEY) {
+    providers.push({ name: 'Groq', endpoint: GROQ_ENDPOINT, model: 'llama-3.3-70b-versatile', apiKey: env.GROQ_API_KEY });
   } else if (preferred === 'mistral' && env.MISTRAL_API_KEY) {
-    providers.push({
-      name: 'Mistral',
-      endpoint: MISTRAL_ENDPOINT,
-      model: 'mistral-large-latest',
-      apiKey: env.MISTRAL_API_KEY,
-    });
+    providers.push({ name: 'Mistral', endpoint: MISTRAL_ENDPOINT, model: 'mistral-large-latest', apiKey: env.MISTRAL_API_KEY });
   } else if (preferred === 'workersai') {
-    providers.push({
-      name: 'WorkersAI',
-      endpoint: null,
-      model: '@cf/meta/llama-3.1-8b-instruct',
-      apiKey: null,
-    });
+    providers.push({ name: 'WorkersAI', endpoint: null, model: '@cf/meta/llama-3.1-8b-instruct', apiKey: null });
   }
 
-  // Fallbacks
-  if (preferred !== 'mistral' && env.MISTRAL_API_KEY) {
-    providers.push({
-      name: 'Mistral',
-      endpoint: MISTRAL_ENDPOINT,
-      model: 'mistral-large-latest',
-      apiKey: env.MISTRAL_API_KEY,
-    });
-  }
-
-  if (preferred !== 'groq' && env.GROQ_API_KEY) {
-    providers.push({
-      name: 'Groq',
-      endpoint: GROQ_ENDPOINT,
-      model: 'llama-3.3-70b-versatile',
-      apiKey: env.GROQ_API_KEY,
-    });
-  }
-
+  // Fallbacks : WorkersAI → Gemini → Groq → Cerebras → OpenRouter → Mistral
   if (preferred !== 'workersai') {
-    providers.push({
-      name: 'WorkersAI',
-      endpoint: null,
-      model: '@cf/meta/llama-3.1-8b-instruct',
-      apiKey: null,
-    });
+    providers.push({ name: 'WorkersAI', endpoint: null, model: '@cf/meta/llama-3.3-70b-instruct', apiKey: null });
+  }
+  if (preferred !== 'gemini' && env.GEMINI_API_KEY) {
+    providers.push({ name: 'Gemini', endpoint: null, model: 'gemini-2.0-flash', apiKey: env.GEMINI_API_KEY });
+  }
+  if (preferred !== 'groq' && env.GROQ_API_KEY) {
+    providers.push({ name: 'Groq', endpoint: GROQ_ENDPOINT, model: 'llama-3.3-70b-versatile', apiKey: env.GROQ_API_KEY });
+  }
+  if (preferred !== 'cerebras' && env.CEREBRAS_API_KEY) {
+    providers.push({ name: 'Cerebras', endpoint: CEREBRAS_ENDPOINT, model: 'llama-3.3-70b', apiKey: env.CEREBRAS_API_KEY });
+  }
+  if (preferred !== 'openrouter' && env.OPENROUTER_API_KEY) {
+    providers.push({ name: 'OpenRouter', endpoint: OPENROUTER_ENDPOINT, model: 'meta-llama/llama-4-scout-17b-16e-instruct:free', apiKey: env.OPENROUTER_API_KEY });
+  }
+  if (preferred !== 'mistral' && env.MISTRAL_API_KEY) {
+    providers.push({ name: 'Mistral', endpoint: MISTRAL_ENDPOINT, model: 'mistral-large-latest', apiKey: env.MISTRAL_API_KEY });
   }
 
   return providers;

@@ -23,13 +23,14 @@ DESTINATION_EMAIL = "ferrierjonas@gmail.com"
 # Heure du fuseau pour l'affichage (Europe/Paris)
 TIMEZONE = "Europe/Paris"
 # Nombre max d'articles à traiter
-MAX_ARTICLES = 25
+MAX_ARTICLES = 15
 # Nombre max de mots par article extraits
 MAX_WORDS_PER_ARTICLE = 1500
-# Provider IA préféré : "groq" | "mistral" | "workersai"
-AI_PROVIDER = "groq"
+# Provider IA préféré : "workersai" | "groq" | "gemini" | "mistral"
+# "workersai" = Cloudflare natif (gratuit, dispo partout, 10K neurons/jour)
+AI_PROVIDER = "workersai"
 
 # === Workers AI (fallback natif, optionnel) ===
-# Décommenter pour activer le fallback Cloudflare Workers AI
-# [ai]
-# binding = "AI"
+# Activé car provider principal
+[ai]
+binding = "AI"

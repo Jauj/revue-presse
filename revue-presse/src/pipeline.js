@@ -53,7 +53,7 @@ export async function phaseFetch(env, eventTime) {
 
       // Sinon, fetcher l'article complet (uniquement si nécessaire — économise le CPU)
       if (!extractedText || extractedText.split(/\s+/).length < 80) {
-        const result = await fetchFullArticle(article.link, article.sourceName);
+        const result = await fetchFullArticle(article.link, article.hasFullContent);
 
         if (result.success) {
           if (result.isMarkdown) {
@@ -162,6 +162,8 @@ export async function phaseAnalyze(env, eventTime) {
     status.model = result.model;
     status.isFallback = result.isFallback || false;
     status.reviewLength = result.content.length;
+    if (result.lastError) status.aiError = result.lastError;
+    if (result.allErrors) status.aiAllErrors = result.allErrors;
 
   } catch (err) {
     status.success = false;
