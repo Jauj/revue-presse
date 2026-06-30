@@ -1,20 +1,20 @@
 // ============================================================
-// fetcher.js — Récupération RSS + fetch articles avec anti-paywall
+// fetcher.js — Récupération RSS multi-stratégies + extraction articles
+// Stratégies : direct | jina_html | telegram_embed
 // ============================================================
 
-import { SOURCES, ANTI_PAYWALL_HEADERS, ALT_HEADERS_FACEBOOK } from './sources.js';
+import { SOURCES, ANTI_PAYWALL_HEADERS } from './sources.js';
+
+// ============================================================
+// Parseurs RSS/Atom
+// ============================================================
 
 /**
- * Parse un flux RSS/Atom et retourne la liste des articles
- * Parseur XML léger (pas de dépendance externe)
+ * Parse un flux RSS/Atom standard
  */
 export function parseRSS(xmlString) {
   const items = [];
-
-  // Normaliser les espaces de noms
   const clean = xmlString.replace(/xmlns[:\w]*="[^"]*"/g, '');
-
-  // Matcher les items RSS ou entries Atom
   const itemRegex = /<(?:item|entry)>([\s\S]*?)<\/(?:item|entry)>/gi;
   let match;
 
@@ -22,43 +22,31 @@ export function parseRSS(xmlString) {
     const block = match[1];
     const item = {};
 
-    // Extraire titre
     const titleMatch = block.match(/<title(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
     if (titleMatch) item.title = titleMatch[1].trim();
 
-    // Extraire lien
     const linkMatch = block.match(/<link[^>]*href="([^"]+)"[^>]*\/?>/i)
       || block.match(/<link[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
     if (linkMatch) item.link = linkMatch[1].trim();
 
-    // Extraire description/résumé
     const descMatch = block.match(/<(?:description|summary)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:description|summary)>/i);
     if (descMatch) item.description = descMatch[1].trim();
 
-    // Extraire contenu plein (content:encoded)
-    const contentMatch = block.match(/<content(?:\s[^>]*)?>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
+    // Content : gère <content>, <content:encoded>, <content type="html">
+    const contentMatch = block.match(/<content(?::\w+)?(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content(?::\w+)?>/i);
     if (contentMatch) item.fullContent = contentMatch[1].trim();
 
-    // Extraire contenu Atom (contenu dans <content type="html">)
-    const atomContent = block.match(/<content[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
-    if (atomContent && !item.fullContent) item.fullContent = atomContent[1].trim();
-
-    // Mastodon : le texte est dans <content type="html">
-    const mastodonContent = block.match(/<content[^>]*type="html"[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
-    if (mastodonContent) {
-      item.fullContent = mastodonContent[1].trim();
-      item.description = mastodonContent[1].replace(/<[^>]*>/g, ' ').trim().substring(0, 500);
+    // Si pas de fullContent mais description longue, l'utiliser
+    if (!item.fullContent && item.description && item.description.split(/\s+/).length > 50) {
+      item.fullContent = item.description;
     }
 
-    // Extraire date de publication
     const dateMatch = block.match(/<(?:pubDate|published|updated|dc:date)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:pubDate|published|updated|dc:date)>/i);
     if (dateMatch) item.pubDate = dateMatch[1].trim();
 
-    // Extraire auteur
     const authorMatch = block.match(/<(?:author|dc:creator)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:author|dc:creator)>/i);
     if (authorMatch) item.author = authorMatch[1].trim().replace(/<[^>]*>/g, '');
 
-    // Si pas de titre, essayer de générer un titre depuis le contenu
     if (!item.title && (item.fullContent || item.description)) {
       const rawText = (item.fullContent || item.description).replace(/<[^>]*>/g, '').trim();
       item.title = rawText.substring(0, 120).trim();
@@ -72,79 +60,203 @@ export function parseRSS(xmlString) {
   return items;
 }
 
-/**
- * Parse un flux RSSHub bridge (Telegram, etc.)
- * Les flux RSSHub ont un format Atom standard mais nécessitent
- * un traitement spécifique pour les liens et le contenu
- */
-function parseBridgeFeed(xmlString, source) {
-  const items = parseRSS(xmlString);
+// ============================================================
+// Parseurs spécialisés
+// ============================================================
 
-  // Les flux Telegram ont parfois des liens vides ou vers t.me
-  // On conserve les items même sans lien si du contenu est disponible
-  return items.filter(item => {
-    // Garder si on a un titre ou du contenu
-    return (item.title && item.title.length > 10) ||
-           (item.description && item.description.length > 30) ||
-           (item.fullContent && item.fullContent.length > 30);
-  }).map(item => {
-    // Nettoyer les URLs Telegram si nécessaire
-    if (item.link && item.link.includes('t.me/')) {
-      item.link = item.link.replace(/\?utm_source.*$/, '');
+/**
+ * Parse le HTML retourné par r.jina.ai pour Les Échos
+ * Extrait les liens et titres des articles depuis le HTML parsé
+ */
+function parseJinaHTML(html, source) {
+  const items = [];
+  // Pattern : <h3><a href="URL">TITRE</a></h3> ou <a href="URL">TITRE</a>
+  // jina retourne un HTML simplifié avec les liens
+  const linkRegex = /<a[^>]+href="(https:\/\/www\.lesechos\.fr\/[^"]+)"[^>]*>([^<]+)<\/a>/gi;
+  let m;
+  const seen = new Set();
+
+  // Extraire d'abord les liens avec le pattern h3 > a (plus fiable)
+  const h3Regex = /<h3><a[^>]+href="(https:\/\/www\.lesechos\.fr\/[^"]+)"[^>]*>([^<]+)<\/a><\/h3>/gi;
+  while ((m = h3Regex.exec(html)) !== null) {
+    const url = m[1];
+    const title = m[2].trim();
+    if (title.length > 15 && !seen.has(url)) {
+      seen.add(url);
+      items.push({ title, link: url, description: '', pubDate: new Date().toUTCString() });
     }
-    return item;
-  });
+  }
+
+  // Puis les autres liens si pas assez
+  if (items.length < 5) {
+    while ((m = linkRegex.exec(html)) !== null) {
+      const url = m[1];
+      const title = m[2].trim();
+      if (title.length > 20 && !seen.has(url) && !url.includes('/rss/') && !url.includes('/newsletter')) {
+        seen.add(url);
+        items.push({ title, link: url, description: '', pubDate: new Date().toUTCString() });
+      }
+    }
+  }
+
+  return items.slice(0, 20); // max 20 articles
 }
 
 /**
- * Récupère tous les flux RSS configurés
- * Retourne un tableau d'articles avec leur source
+ * Parse la page embed Telegram (t.me/s/channel)
+ * Extrait les messages du channel comme articles
+ */
+function parseTelegramEmbed(html, source) {
+  const items = [];
+
+  // Découper en blocs de messages (chaque message est un div widget)
+  // Approche robuste : split par le séparateur de message
+  const messageBlocks = html.split(/<div class="tgme_widget_message\b/);
+  // Le premier élément est avant le premier message (header), l'ignorer
+  for (let i = 1; i < messageBlocks.length; i++) {
+    const block = messageBlocks[i];
+
+    // Extraire le texte du message
+    const textMatch = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<div/);
+    if (!textMatch) {
+      // Essayer un pattern plus simple (dernier message de la page)
+      const textMatch2 = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+      if (!textMatch2) continue;
+      var rawText = textMatch2[1];
+    } else {
+      var rawText = textMatch[1];
+    }
+
+    // Extraire le lien du message
+    const linkMatch = block.match(/<a class="tgme_widget_message_date"[^>]*href="([^"]+)"/);
+
+    let text = rawText.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<[^>]*>/g, '').trim();
+    text = text.replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+
+    if (text.length > 50) {
+      const beforeMatch = (linkMatch?.[1] || '').match(/before=(\d+)/);
+      const link = beforeMatch
+        ? `https://t.me/revolution_permanente/${beforeMatch[1]}`
+        : `https://t.me/s/revolution_permanente`;
+
+      items.push({
+        title: text.substring(0, 120).trim(),
+        link,
+        description: text.substring(0, 500),
+        fullContent: text,
+        pubDate: new Date().toUTCString(),
+      });
+    }
+  }
+
+  return items.slice(0, 20);
+}
+
+// ============================================================
+// Fetch principal
+// ============================================================
+
+/**
+ * Fetch un flux selon sa stratégie
+ */
+async function fetchSource(source) {
+  const strategy = source.fetchStrategy || 'direct';
+  const timeout = source.timeout || 20000;
+  const headers = source.headers || {
+    'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+    'Accept': 'application/rss+xml, application/xml, text/xml',
+  };
+
+  let response;
+  let text;
+
+  switch (strategy) {
+    case 'jina_html': {
+      // Les Échos : 403 direct → r.jina.ai proxy
+      const jinaUrl = source.jinaUrl || `https://r.jina.ai/${source.url}`;
+      response = await fetch(jinaUrl, {
+        headers: { 'Accept': 'text/html', 'X-Return-Format': 'html' },
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      text = await response.text();
+      return parseJinaHTML(text, source);
+    }
+
+    case 'telegram_embed': {
+      // Révolution Permanente : page embed Telegram
+      response = await fetch(source.url, {
+        headers,
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      text = await response.text();
+      return parseTelegramEmbed(text, source);
+    }
+
+    case 'direct':
+    default: {
+      // Fetch RSS standard
+      response = await fetch(source.url, {
+        headers,
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      text = await response.text();
+
+      // Vérifier que c'est bien du XML
+      if (!text.includes('<') || text.includes('<HTML') || text.includes('<html')) {
+        throw new Error('Réponse HTML au lieu de XML');
+      }
+
+      return parseRSS(text);
+    }
+  }
+}
+
+/**
+ * Récupère tous les flux RSS configurés avec retry
  */
 export async function fetchAllFeeds(maxArticles) {
   const allArticles = [];
   const errors = [];
+  const sourceStatus = {};
 
-  // Lancer les fetchs en parallèle (batch de 5 pour ne pas surcharger)
-  const batchSize = 5;
+  // Séparer les sources jina_html (rate limitées) des sources directes
+  const jinaSources = SOURCES.filter(s => s.fetchStrategy === 'jina_html');
+  const otherSources = SOURCES.filter(s => s.fetchStrategy !== 'jina_html');
 
-  for (let i = 0; i < SOURCES.length; i += batchSize) {
-    const batch = SOURCES.slice(i, i + batchSize);
+  // Lancer les sources directes en batch de 4
+  const batchSize = 4;
+
+  // Phase 1 : sources directes en parallèle
+  for (let i = 0; i < otherSources.length; i += batchSize) {
+    const batch = otherSources.slice(i, i + batchSize);
     const results = await Promise.allSettled(
       batch.map(async (source) => {
-        try {
-          const response = await fetch(source.url, {
-            headers: {
-              'User-Agent': 'RevueDePresse/1.0 (RSS Aggregator)',
-              'Accept': 'application/rss+xml, application/xml, text/xml',
-            },
-            signal: AbortSignal.timeout(15000), // 15s timeout
-          });
+        // Retry : 2 tentatives avec backoff
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const items = await fetchSource(source);
+            sourceStatus[source.name] = { ok: true, count: items.length };
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            return items.map((item) => ({
+              ...item,
+              sourceName: source.name,
+              sourceCategory: source.category,
+              sourceLang: source.lang,
+              hasFullContent: source.hasFullContent || !!item.fullContent,
+              fetchStrategy: source.fetchStrategy || 'direct',
+            }));
+          } catch (err) {
+            if (attempt === 2) {
+              sourceStatus[source.name] = { ok: false, error: err.message };
+              throw new Error(`${source.name}: ${err.message}`);
+            }
+            // Attendre 2s avant le retry
+            await new Promise(r => setTimeout(r, 2000));
           }
-
-          const xml = await response.text();
-          let items;
-
-          // Gestion des flux bridges (Telegram via RSSHub)
-          if (source.isBridge) {
-            items = parseBridgeFeed(xml, source);
-          } else {
-            items = parseRSS(xml);
-          }
-
-          return items.map((item) => ({
-            ...item,
-            sourceName: source.name,
-            sourceCategory: source.category,
-            sourceLang: source.lang,
-            forceFullFetch: source.forceFullFetch || false,
-            clearCookies: source.clearCookies || false,
-            hasFullContent: source.hasFullContent || false,
-          }));
-        } catch (err) {
-          throw new Error(`${source.name}: ${err.message}`);
         }
       })
     );
@@ -158,6 +270,27 @@ export async function fetchAllFeeds(maxArticles) {
     }
   }
 
+  // Phase 2 : sources jina_html séquentiellement (pour éviter le rate limit 429)
+  for (const source of jinaSources) {
+    try {
+      const items = await fetchSource(source);
+      sourceStatus[source.name] = { ok: true, count: items.length };
+      allArticles.push(...items.map(item => ({
+        ...item,
+        sourceName: source.name,
+        sourceCategory: source.category,
+        sourceLang: source.lang,
+        hasFullContent: false,
+        fetchStrategy: source.fetchStrategy,
+      })));
+      // Attendre 1s entre chaque requête jina
+      await new Promise(r => setTimeout(r, 1000));
+    } catch (err) {
+      sourceStatus[source.name] = { ok: false, error: err.message };
+      errors.push(err.message);
+    }
+  }
+
   // Trier par date (plus récent d'abord)
   allArticles.sort((a, b) => {
     const dateA = a.pubDate ? new Date(a.pubDate) : new Date(0);
@@ -166,19 +299,17 @@ export async function fetchAllFeeds(maxArticles) {
   });
 
   // Limiter le nombre d'articles
-  const limited = allArticles.slice(0, maxArticles || 25);
+  const limited = allArticles.slice(0, maxArticles || 30);
 
-  return { articles: limited, totalFound: allArticles.length, errors };
+  return { articles: limited, totalFound: allArticles.length, errors, sourceStatus };
 }
 
 /**
- * Fetch un article complet avec headers anti-paywall
- * VERSION OPTIMISÉE : stratégie unique pour économiser les sous-requêtes
- * - hasFullContent → Googlebot UA (une seule requête)
- * - Sinon → r.jina.ai directement (une seule requête, fiable)
+ * Fetch un article complet avec stratégie anti-paywall
+ * 3 niveaux : Googlebot → Facebookbot → r.jina.ai
  */
 export async function fetchFullArticle(url, hasFullContent = false) {
-  // === Si la source RSS a déjà du contenu, essayer Googlebot pour plus ===
+  // === Si la source RSS a déjà du contenu complet, essayer Googlebot ===
   if (hasFullContent) {
     try {
       const resp = await fetch(url, {
@@ -194,13 +325,10 @@ export async function fetchFullArticle(url, hasFullContent = false) {
     } catch (e) { /* skip */ }
   }
 
-  // === Stratégie principale : r.jina.ai (1 seule requête, très fiable) ===
+  // === Stratégie principale : r.jina.ai ===
   try {
     const resp = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
-      headers: {
-        'Accept': 'text/plain',
-        'X-Return-Format': 'text',
-      },
+      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text' },
       signal: AbortSignal.timeout(20000),
     });
     if (resp.ok) {

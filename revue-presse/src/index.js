@@ -1,169 +1,133 @@
 // ============================================================
 // index.js — Point d'entrée Cloudflare Worker
-// Gère les Cron Triggers (3 phases) + endpoints HTTP (test/dashboard)
+// 7 phases CoT : FETCH → EXTRACT → THEME → DRAFT → REVIEW → SYNTHESIS → DELIVER
+// + endpoints HTTP pour monitoring et tests
 // ============================================================
 
-import { phaseFetch, phaseAnalyze, phaseDeliver, getStatus } from './pipeline.js';
+import {
+  phaseFetch, phaseExtract, phaseTheme, phaseDraft,
+  phaseReview, phaseSynthesis, phaseDeliver, getStatus,
+} from './pipeline.js';
+
+// Mapping minute cron → phase
+const PHASE_MAP = {
+  0: 'fetch',
+  3: 'extract',
+  6: 'theme',
+  9: 'draft',
+  12: 'review',
+  15: 'synthesis',
+  18: 'deliver',
+};
 
 export default {
   // ============================================================
   // CRON TRIGGER — Routage vers la bonne phase
   // ============================================================
   async scheduled(event, env, ctx) {
-    const cron = event.cron; // ex: "0 6 * * 1-5"
+    const minute = parseInt(event.cron.split(' ')[0]);
+    const phase = PHASE_MAP[minute];
 
-    // Déterminer la phase à partir du cron
-    // "0 6 * * 1-5" → Phase 1 (minute 0)
-    // "2 6 * * 1-5" → Phase 2 (minute 2)
-    // "4 6 * * 1-5" → Phase 3 (minute 4)
-    const minute = parseInt(cron.split(' ')[0]);
-
-    let result;
-
-    if (minute === 0) {
-      // === PHASE 1 : FETCH ===
-      console.log('[Phase 1] Démarrage de la récupération RSS + extraction articles...');
-      result = await phaseFetch(env, new Date(event.scheduledTime));
-      console.log('[Phase 1] Terminé:', JSON.stringify(result));
-
-    } else if (minute === 2) {
-      // === PHASE 2 : ANALYZE ===
-      console.log('[Phase 2] Démarrage de l\'analyse IA...');
-      result = await phaseAnalyze(env, new Date(event.scheduledTime));
-      console.log('[Phase 2] Terminé:', JSON.stringify(result));
-
-    } else if (minute === 4) {
-      // === PHASE 3 : DELIVER ===
-      console.log('[Phase 3] Démarrage de l\'envoi email...');
-      result = await phaseDeliver(env, new Date(event.scheduledTime));
-      console.log('[Phase 3] Terminé:', JSON.stringify(result));
-
-    } else {
-      console.log(`Cron inconnu: ${cron}`);
-      result = { error: 'Cron trigger non reconnu', cron };
+    if (!phase) {
+      console.log(`Cron non reconnu (minute ${minute}): ${event.cron}`);
+      return { error: 'Cron non reconnu', minute };
     }
 
+    console.log(`[Phase ${phase}] Démarrage...`);
+    const result = await runPhase(phase, env, new Date(event.scheduledTime));
+    console.log(`[Phase ${phase}] Terminé:`, JSON.stringify(result));
     return result;
   },
 
   // ============================================================
-  // HTTP HANDLER — Endpoints de test et de monitoring
+  // HTTP HANDLER — Endpoints de test et monitoring
   // ============================================================
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // CORS pour les requêtes depuis le dashboard
     if (request.method === 'OPTIONS') {
       return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
+        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' },
       });
     }
 
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Content-Type': 'application/json',
-    };
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
 
     try {
-      // === GET / → Statut du pipeline ===
+      // GET / → Statut global
       if (path === '/' && request.method === 'GET') {
         const status = await getStatus(env);
-        return new Response(JSON.stringify({
-          service: 'Revue de Presse',
-          version: '1.0.0',
-          ...status,
-        }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ service: 'Revue de Presse CoT', version: '2.0.0', ...status }), { headers: cors });
       }
 
-      // === GET /status → Dernier statut ===
+      // GET /status → Statut détaillé par phase
       if (path === '/status' && request.method === 'GET') {
         const status = await getStatus(env);
-        return new Response(JSON.stringify(status), { headers: corsHeaders });
+        return new Response(JSON.stringify(status), { headers: cors });
       }
 
-      // === POST /trigger/fetch → Déclencher manuellement la Phase 1 ===
-      if (path === '/trigger/fetch' && request.method === 'POST') {
-        const result = await phaseFetch(env, new Date());
-        return new Response(JSON.stringify({
-          triggered: 'phase_fetch',
-          ...result,
-        }), { headers: corsHeaders });
+      // POST /trigger/<phase> → Déclencher une phase manuellement
+      const triggerMatch = path.match(/^\/trigger\/(\w+)$/);
+      if (triggerMatch && request.method === 'POST') {
+        const phaseName = triggerMatch[1];
+        const result = await runPhase(phaseName, env, new Date());
+        return new Response(JSON.stringify({ triggered: phaseName, ...result }), { headers: cors });
       }
 
-      // === POST /trigger/analyze → Déclencher manuellement la Phase 2 ===
-      if (path === '/trigger/analyze' && request.method === 'POST') {
-        const result = await phaseAnalyze(env, new Date());
-        return new Response(JSON.stringify({
-          triggered: 'phase_analyze',
-          ...result,
-        }), { headers: corsHeaders });
-      }
-
-      // === POST /trigger/deliver → Déclencher manuellement la Phase 3 ===
-      if (path === '/trigger/deliver' && request.method === 'POST') {
-        const result = await phaseDeliver(env, new Date());
-        return new Response(JSON.stringify({
-          triggered: 'phase_deliver',
-          ...result,
-        }), { headers: corsHeaders });
-      }
-
-      // === POST /trigger/all → Pipeline complet (pour les tests manuels) ===
+      // POST /trigger/all → Pipeline séquentiel (uniquement fetch+extract pour test rapide)
       if (path === '/trigger/all' && request.method === 'POST') {
         const results = {};
 
-        // Phase 1
-        results.phase1 = await phaseFetch(env, new Date());
-        if (!results.phase1.success) {
-          return new Response(JSON.stringify({
-            triggered: 'all',
-            stoppedAt: 'phase1',
-            ...results,
-          }), { status: 500, headers: corsHeaders });
+        results.fetch = await runPhase('fetch', env, new Date());
+        if (!results.fetch.success) {
+          return new Response(JSON.stringify({ triggered: 'all', stoppedAt: 'fetch', ...results }), { status: 500, headers: cors });
         }
 
-        // Phase 2
-        results.phase2 = await phaseAnalyze(env, new Date());
-        if (!results.phase2.success) {
-          return new Response(JSON.stringify({
-            triggered: 'all',
-            stoppedAt: 'phase2',
-            ...results,
-          }), { status: 500, headers: corsHeaders });
-        }
+        results.extract = await runPhase('extract', env, new Date());
+        results.theme = await runPhase('theme', env, new Date());
+        results.draft = await runPhase('draft', env, new Date());
+        results.review = await runPhase('review', env, new Date());
+        results.synthesis = await runPhase('synthesis', env, new Date());
+        results.deliver = await runPhase('deliver', env, new Date());
 
-        // Phase 3
-        results.phase3 = await phaseDeliver(env, new Date());
-
-        return new Response(JSON.stringify({
-          triggered: 'all',
-          ...results,
-        }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ triggered: 'all', ...results }), { headers: cors });
       }
 
-      // === Route inconnue ===
       return new Response(JSON.stringify({
         error: 'Route non trouvée',
-        available_routes: {
-          'GET /': 'Statut du service',
-          'GET /status': 'Dernier statut du pipeline',
-          'POST /trigger/fetch': 'Déclencher Phase 1 (récupération)',
-          'POST /trigger/analyze': 'Déclencher Phase 2 (analyse IA)',
-          'POST /trigger/deliver': 'Déclencher Phase 3 (envoi email)',
-          'POST /trigger/all': 'Pipeline complet (test)',
+        routes: {
+          'GET /': 'Statut global',
+          'GET /status': 'Statut détaillé CoT',
+          'POST /trigger/fetch': 'Phase 1 — Récupération RSS',
+          'POST /trigger/extract': 'Phase 2 — Extraction IA',
+          'POST /trigger/theme': 'Phase 3 — Thématisation IA',
+          'POST /trigger/draft': 'Phase 4 — Rédaction IA',
+          'POST /trigger/review': 'Phase 5 — Revue critique IA',
+          'POST /trigger/synthesis': 'Phase 6 — Synthèse EIC (2 appels 10s)',
+          'POST /trigger/deliver': 'Phase 7 — Envoi email',
+          'POST /trigger/all': 'Pipeline complet (test, >5 min)',
         },
-      }), { status: 404, headers: corsHeaders });
+      }), { status: 404, headers: cors });
 
     } catch (err) {
-      return new Response(JSON.stringify({
-        error: err.message,
-        stack: err.stack,
-      }), { status: 500, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: err.message, stack: err.stack }), { status: 500, headers: cors });
     }
   },
 };
+
+// ============================================================
+// Routeur de phase
+// ============================================================
+async function runPhase(name, env, eventTime) {
+  switch (name) {
+    case 'fetch': return phaseFetch(env, eventTime);
+    case 'extract': return phaseExtract(env, eventTime);
+    case 'theme': return phaseTheme(env, eventTime);
+    case 'draft': return phaseDraft(env, eventTime);
+    case 'review': return phaseReview(env, eventTime);
+    case 'synthesis': return phaseSynthesis(env, eventTime);
+    case 'deliver': return phaseDeliver(env, eventTime);
+    default: return { success: false, error: `Phase inconnue: ${name}` };
+  }
+}

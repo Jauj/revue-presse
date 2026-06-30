@@ -1,75 +1,71 @@
 // ============================================================
-// pipeline.js — Orchestration des 3 phases du traitement
-// Phase 1 (FETCH) → KV → Phase 2 (ANALYZE) → KV → Phase 3 (DELIVER)
+// pipeline.js — 7 phases du traitement CoT
+// Phase 1 (FETCH) → 2 (EXTRACT) → 3 (THEME) → 4 (DRAFT) →
+//   5 (REVIEW) → 6 (SYNTHESIS) → 7 (DELIVER)
+// Chaque phase = 1 cron trigger espacé de 3 min
 // ============================================================
 
 import { fetchAllFeeds, fetchFullArticle } from './fetcher.js';
-import { extractTextFromHTML, isPaywallPage, extractMetadata } from './extractor.js';
-import { generatePressReview } from './ai.js';
+import { extractTextFromHTML, isPaywallPage } from './extractor.js';
+import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
 import { buildEmailHTML, buildSubject, sendEmail } from './email.js';
 
-const KV_KEY_ARTICLES = 'pipeline:articles';
-const KV_KEY_REVIEW = 'pipeline:review';
-const KV_KEY_STATUS = 'pipeline:status';
-const KV_KEY_ERRORS = 'pipeline:errors';
+// Clés KV pour le bus inter-phases
+const KV_ARTICLES = 'pipeline:articles';
+const KV_EXTRACTION = 'pipeline:stage1_extraction';
+const KV_THEMES = 'pipeline:stage2_themes';
+const KV_DRAFT = 'pipeline:stage3_draft';
+const KV_REVIEW = 'pipeline:stage4_review';
+const KV_SYNTHESIS = 'pipeline:stage5_synthesis';
+const KV_REVIEW_FINAL = 'pipeline:review_final';
+const KV_STATUS = 'pipeline:status';
+const KV_ERRORS = 'pipeline:errors';
+
+function statusKey(phase) { return `pipeline:phase_${phase}_status`; }
 
 // ============================================================
-// PHASE 1 — FETCH : Récupérer RSS + extraire les articles complets
+// PHASE 1 — FETCH : Récupérer RSS + extraire les articles
 // ============================================================
 export async function phaseFetch(env, eventTime) {
-  const status = { phase: 'fetch', startedAt: eventTime.toISOString() };
+  const status = { phase: 'fetch', startedAt: eventTime.toISOString(), step: 'init' };
   const errors = [];
 
   try {
-    // 1. Récupérer tous les flux RSS
-    const maxArticles = parseInt(env.MAX_ARTICLES) || 25;
+    const maxArticles = parseInt(env.MAX_ARTICLES) || 30;
     const maxWords = parseInt(env.MAX_WORDS_PER_ARTICLE) || 1500;
 
+    // 1. Fetch RSS
     status.step = 'rss_fetch';
-    const feedResult = await fetchAllFeeds(maxArticles * 2); // En demander plus car certains échoueront
-
+    const feedResult = await fetchAllFeeds(maxArticles * 2);
     status.foundInFeeds = feedResult.totalFound;
+    status.sourceStatus = feedResult.sourceStatus;
     errors.push(...feedResult.errors);
 
-    // 2. Pour chaque article, récupérer le texte complet
+    // 2. Extraire le texte complet des articles
     status.step = 'article_extraction';
-    const processedArticles = [];
+    const processed = [];
 
     for (const article of feedResult.articles) {
-      // Si le RSS contient déjà le texte complet (flux "full" ou blogs WordPress), l'utiliser
-      // hasFullContent = true → le flux RSS inclut le texte intégral
-      // Sinon, vérifier si le contenu est assez long (>100 mots)
       let extractedText = '';
 
+      // Si le RSS a déjà le contenu complet
       if (article.fullContent && article.fullContent.split(/\s+/).length > 80) {
-        // Nettoyer le HTML du contenu RSS
-        extractedText = article.fullContent
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .substring(0, maxWords * 8);
+        extractedText = article.fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxWords * 8);
         article.extractionMethod = 'rss_full';
       }
 
-      // Sinon, fetcher l'article complet (uniquement si nécessaire — économise le CPU)
+      // Sinon, fetcher l'article
       if (!extractedText || extractedText.split(/\s+/).length < 80) {
         const result = await fetchFullArticle(article.link, article.hasFullContent);
-
         if (result.success) {
           if (result.isMarkdown) {
-            // r.jina.ai retourne du Markdown → utiliser directement
             extractedText = result.text;
             article.extractionMethod = result.method;
           } else if (result.html) {
-            // Extraire le texte du HTML
             const extraction = extractTextFromHTML(result.html, maxWords);
             extractedText = extraction.text;
             article.extractionMethod = result.method;
-
-            // Vérifier si c'est une page de paywall
-            if (isPaywallPage(extractedText)) {
-              article.extractionMethod += '+paywall_detected';
-            }
+            if (isPaywallPage(extractedText)) article.extractionMethod += '+paywall';
           }
         }
       }
@@ -77,28 +73,26 @@ export async function phaseFetch(env, eventTime) {
       if (extractedText && extractedText.split(/\s+/).length > 30) {
         article.extractedText = extractedText;
         article.extractedWords = extractedText.split(/\s+/).length;
-        processedArticles.push(article);
+        processed.push(article);
       }
-
-      // Respecter la limite d'articles
-      if (processedArticles.length >= maxArticles) break;
+      if (processed.length >= maxArticles) break;
     }
 
-    // 3. Stocker dans KV pour la Phase 2
+    // 3. Stocker dans KV
     status.step = 'kv_store';
-    await env.CACHE.put(KV_KEY_ARTICLES, JSON.stringify({
+    await env.CACHE.put(KV_ARTICLES, JSON.stringify({
       date: eventTime.toISOString(),
-      articles: processedArticles,
+      articles: processed,
       meta: {
-        total: processedArticles.length,
-        sources: [...new Set(processedArticles.map(a => a.sourceName))],
-        errors: errors,
+        total: processed.length,
+        sources: [...new Set(processed.map(a => a.sourceName))],
+        errors,
       },
-    }), { expirationTtl: 3600 }); // Expire dans 1h
+    }), { expirationTtl: 7200 }); // 2h TTL (pipeline CoT est plus long)
 
     status.success = true;
-    status.articlesExtracted = processedArticles.length;
-    status.sourcesUsed = [...new Set(processedArticles.map(a => a.sourceName))];
+    status.articlesExtracted = processed.length;
+    status.sourcesUsed = [...new Set(processed.map(a => a.sourceName))];
 
   } catch (err) {
     status.success = false;
@@ -106,138 +100,259 @@ export async function phaseFetch(env, eventTime) {
     errors.push(`Phase FETCH: ${err.message}`);
   }
 
-  // Stocker le statut
-  await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-  await env.CACHE.put(KV_KEY_ERRORS, JSON.stringify(errors), { expirationTtl: 86400 });
-
+  await env.CACHE.put(KV_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+  await env.CACHE.put(KV_ERRORS, JSON.stringify(errors), { expirationTtl: 86400 });
   return status;
 }
 
 // ============================================================
-// PHASE 2 — ANALYZE : Appel IA pour générer la revue de presse
+// PHASE 2 — ÉTAPE 1 IA : Extraction des faits structurés
 // ============================================================
-export async function phaseAnalyze(env, eventTime) {
-  const status = { phase: 'analyze', startedAt: eventTime.toISOString() };
+export async function phaseExtract(env, eventTime) {
+  const status = { phase: 'extract', startedAt: eventTime.toISOString(), step: 'kv_read' };
 
   try {
-    // 1. Lire les articles depuis KV
-    status.step = 'kv_read';
-    const articlesData = await env.CACHE.get(KV_KEY_ARTICLES);
+    const raw = await env.CACHE.get(KV_ARTICLES);
+    if (!raw) throw new Error('Aucun article en KV. Phase 1 exécutée ?');
+    const { articles, meta } = JSON.parse(raw);
+    if (!articles.length) throw new Error('0 article extrait.');
 
-    if (!articlesData) {
-      status.success = false;
-      status.error = 'Aucun article trouvé en KV. La Phase 1 a-t-elle bien fonctionné ?';
-      await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-      return status;
-    }
-
-    const { articles, meta } = JSON.parse(articlesData);
-
-    if (articles.length === 0) {
-      status.success = false;
-      status.error = '0 article extrait pendant la Phase 1.';
-      await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-      return status;
-    }
-
+    status.step = 'ai_extract';
     status.articlesFound = articles.length;
+    const result = await stage1_extract(articles, env);
 
-    // 2. Appeler l'IA
-    status.step = 'ai_call';
-    const result = await generatePressReview(articles, env);
-
-    // 3. Stocker la revue dans KV
-    status.step = 'kv_store_review';
-    await env.CACHE.put(KV_KEY_REVIEW, JSON.stringify({
+    await env.CACHE.put(KV_EXTRACTION, JSON.stringify({
       date: eventTime.toISOString(),
       content: result.content,
       provider: result.provider,
-      model: result.model,
-      isFallback: result.isFallback || false,
       meta,
-    }), { expirationTtl: 3600 });
+    }), { expirationTtl: 7200 });
 
     status.success = true;
     status.provider = result.provider;
-    status.model = result.model;
-    status.isFallback = result.isFallback || false;
-    status.reviewLength = result.content.length;
-    if (result.lastError) status.aiError = result.lastError;
-    if (result.allErrors) status.aiAllErrors = result.allErrors;
+    status.outputLength = result.content.length;
 
   } catch (err) {
     status.success = false;
     status.error = err.message;
   }
 
-  await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-
+  await env.CACHE.put(statusKey('extract'), JSON.stringify(status), { expirationTtl: 86400 });
   return status;
 }
 
 // ============================================================
-// PHASE 3 — DELIVER : Envoyer la revue de presse par email
+// PHASE 3 — ÉTAPE 2 IA : Thématisation
 // ============================================================
-export async function phaseDeliver(env, eventTime) {
-  const status = { phase: 'deliver', startedAt: eventTime.toISOString() };
+export async function phaseTheme(env, eventTime) {
+  const status = { phase: 'theme', startedAt: eventTime.toISOString(), step: 'kv_read' };
 
   try {
-    // 1. Lire la revue depuis KV
-    status.step = 'kv_read_review';
-    const reviewData = await env.CACHE.get(KV_KEY_REVIEW);
+    const extractionRaw = await env.CACHE.get(KV_EXTRACTION);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!extractionRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
 
-    if (!reviewData) {
-      status.success = false;
-      status.error = 'Aucune revue trouvée en KV. La Phase 2 a-t-elle bien fonctionné ?';
-      await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-      return status;
-    }
+    const extraction = JSON.parse(extractionRaw).content;
+    const { articles } = JSON.parse(articlesRaw);
 
-    const review = JSON.parse(reviewData);
+    status.step = 'ai_theme';
+    const result = await stage2_theme(extraction, articles, env);
 
-    // 2. Lire les articles pour les stats
-    const articlesData = await env.CACHE.get(KV_KEY_ARTICLES);
-    const articles = articlesData ? JSON.parse(articlesData).articles : [];
+    await env.CACHE.put(KV_THEMES, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+    }), { expirationTtl: 7200 });
 
-    // 3. Construire l'email
+    status.success = true;
+    status.provider = result.provider;
+    status.outputLength = result.content.length;
+
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+
+  await env.CACHE.put(statusKey('theme'), JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+
+// ============================================================
+// PHASE 4 — ÉTAPE 3 IA : Rédaction du brouillon
+// ============================================================
+export async function phaseDraft(env, eventTime) {
+  const status = { phase: 'draft', startedAt: eventTime.toISOString(), step: 'kv_read' };
+
+  try {
+    const themesRaw = await env.CACHE.get(KV_THEMES);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!themesRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
+
+    const themes = JSON.parse(themesRaw).content;
+    const { articles } = JSON.parse(articlesRaw);
+
+    status.step = 'ai_draft';
+    const result = await stage3_draft(themes, articles, env);
+
+    await env.CACHE.put(KV_DRAFT, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+    }), { expirationTtl: 7200 });
+
+    status.success = true;
+    status.provider = result.provider;
+    status.outputLength = result.content.length;
+
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+
+  await env.CACHE.put(statusKey('draft'), JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+
+// ============================================================
+// PHASE 5 — ÉTAPE 4 IA : Revue critique
+// ============================================================
+export async function phaseReview(env, eventTime) {
+  const status = { phase: 'review', startedAt: eventTime.toISOString(), step: 'kv_read' };
+
+  try {
+    const draftRaw = await env.CACHE.get(KV_DRAFT);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!draftRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
+
+    const draft = JSON.parse(draftRaw).content;
+    const { articles } = JSON.parse(articlesRaw);
+
+    status.step = 'ai_review';
+    const result = await stage4_review(draft, articles, env);
+
+    await env.CACHE.put(KV_REVIEW, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+    }), { expirationTtl: 7200 });
+
+    status.success = true;
+    status.provider = result.provider;
+    status.outputLength = result.content.length;
+
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+
+  await env.CACHE.put(statusKey('review'), JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+
+// ============================================================
+// PHASE 6 — ÉTAPE 5 IA : Synthèse EIC (2 appels espacés de 10s)
+// ============================================================
+export async function phaseSynthesis(env, eventTime) {
+  const status = { phase: 'synthesis', startedAt: eventTime.toISOString(), step: 'kv_read' };
+
+  try {
+    const draftRaw = await env.CACHE.get(KV_DRAFT);
+    const reviewRaw = await env.CACHE.get(KV_REVIEW);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!draftRaw || !reviewRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
+
+    const draft = JSON.parse(draftRaw).content;
+    const review = JSON.parse(reviewRaw).content;
+    const { articles } = JSON.parse(articlesRaw);
+
+    status.step = 'ai_synthesis';
+    const result = await stage5_synthesis(draft, review, articles, env);
+
+    // Stocker la revue finale
+    const articlesRaw2 = await env.CACHE.get(KV_ARTICLES);
+    const meta = articlesRaw2 ? JSON.parse(articlesRaw2).meta : {};
+
+    await env.CACHE.put(KV_REVIEW_FINAL, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+      meta,
+      cotStages: ['extraction', 'theming', 'drafting', 'review', 'synthesis'],
+    }), { expirationTtl: 7200 });
+
+    status.success = true;
+    status.provider = result.provider;
+    status.outputLength = result.content.length;
+
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+
+  await env.CACHE.put(statusKey('synthesis'), JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+
+// ============================================================
+// PHASE 7 — DELIVER : Envoi email
+// ============================================================
+export async function phaseDeliver(env, eventTime) {
+  const status = { phase: 'deliver', startedAt: eventTime.toISOString(), step: 'kv_read' };
+
+  try {
+    const reviewRaw = await env.CACHE.get(KV_REVIEW_FINAL);
+    if (!reviewRaw) throw new Error('Aucune revue finale en KV. Pipeline CoT incomplet ?');
+
+    const review = JSON.parse(reviewRaw);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    const articles = articlesRaw ? JSON.parse(articlesRaw).articles : [];
+
     status.step = 'build_email';
     const date = new Date(eventTime);
     const subject = buildSubject(date);
     const htmlContent = buildEmailHTML(review.content, articles, date);
 
-    // 4. Envoyer via Resend
     status.step = 'send_email';
     const sendResult = await sendEmail(env, subject, htmlContent);
 
     status.success = true;
     status.emailId = sendResult.id;
     status.provider = review.provider;
+    status.cotStages = review.cotStages;
     status.subject = subject;
 
-    // Nettoyer les données KV (elles ont expiré de toute façon)
-    await env.CACHE.delete(KV_KEY_ARTICLES);
-    await env.CACHE.delete(KV_KEY_REVIEW);
+    // Nettoyer le KV
+    for (const key of [KV_ARTICLES, KV_EXTRACTION, KV_THEMES, KV_DRAFT, KV_REVIEW, KV_SYNTHESIS, KV_REVIEW_FINAL]) {
+      await env.CACHE.delete(key);
+    }
 
   } catch (err) {
     status.success = false;
     status.error = err.message;
   }
 
-  await env.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
-
+  await env.CACHE.put(statusKey('deliver'), JSON.stringify(status), { expirationTtl: 86400 });
   return status;
 }
 
 // ============================================================
-// UTILITAIRES : Lecture du statut (pour le dashboard HTTP)
+// UTILITAIRES
 // ============================================================
 export async function getStatus(env) {
-  const statusRaw = await env.CACHE.get(KV_KEY_STATUS);
-  const errorsRaw = await env.CACHE.get(KV_KEY_ERRORS);
+  const statusRaw = await env.CACHE.get(KV_STATUS);
+  const errorsRaw = await env.CACHE.get(KV_ERRORS);
+
+  // Collecter le statut de chaque phase CoT
+  const phaseStatuses = {};
+  for (const phase of ['extract', 'theme', 'draft', 'review', 'synthesis', 'deliver']) {
+    const raw = await env.CACHE.get(statusKey(phase));
+    if (raw) phaseStatuses[phase] = JSON.parse(raw);
+  }
 
   return {
     status: statusRaw ? JSON.parse(statusRaw) : null,
     errors: errorsRaw ? JSON.parse(errorsRaw) : [],
+    cotPhases: phaseStatuses,
     kvNamespace: !!env.CACHE,
   };
 }
