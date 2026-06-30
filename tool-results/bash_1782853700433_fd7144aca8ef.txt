@@ -1,0 +1,2010 @@
+--e93e4aca57d289aa12e56395fcec0bf216f1cc5382e393466338c6155c5a
+Content-Disposition: form-data; name="index.js"
+
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/_internal/utils.mjs
+// @__NO_SIDE_EFFECTS__
+function createNotImplementedError(name) {
+  return new Error(`[unenv] ${name} is not implemented yet!`);
+}
+__name(createNotImplementedError, "createNotImplementedError");
+// @__NO_SIDE_EFFECTS__
+function notImplemented(name) {
+  const fn = /* @__PURE__ */ __name(() => {
+    throw /* @__PURE__ */ createNotImplementedError(name);
+  }, "fn");
+  return Object.assign(fn, { __unenv__: true });
+}
+__name(notImplemented, "notImplemented");
+// @__NO_SIDE_EFFECTS__
+function notImplementedClass(name) {
+  return class {
+    __unenv__ = true;
+    constructor() {
+      throw new Error(`[unenv] ${name} is not implemented yet!`);
+    }
+  };
+}
+__name(notImplementedClass, "notImplementedClass");
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/perf_hooks/performance.mjs
+var _timeOrigin = globalThis.performance?.timeOrigin ?? Date.now();
+var _performanceNow = globalThis.performance?.now ? globalThis.performance.now.bind(globalThis.performance) : () => Date.now() - _timeOrigin;
+var nodeTiming = {
+  name: "node",
+  entryType: "node",
+  startTime: 0,
+  duration: 0,
+  nodeStart: 0,
+  v8Start: 0,
+  bootstrapComplete: 0,
+  environment: 0,
+  loopStart: 0,
+  loopExit: 0,
+  idleTime: 0,
+  uvMetricsInfo: {
+    loopCount: 0,
+    events: 0,
+    eventsWaiting: 0
+  },
+  detail: void 0,
+  toJSON() {
+    return this;
+  }
+};
+var PerformanceEntry = class {
+  static {
+    __name(this, "PerformanceEntry");
+  }
+  __unenv__ = true;
+  detail;
+  entryType = "event";
+  name;
+  startTime;
+  constructor(name, options) {
+    this.name = name;
+    this.startTime = options?.startTime || _performanceNow();
+    this.detail = options?.detail;
+  }
+  get duration() {
+    return _performanceNow() - this.startTime;
+  }
+  toJSON() {
+    return {
+      name: this.name,
+      entryType: this.entryType,
+      startTime: this.startTime,
+      duration: this.duration,
+      detail: this.detail
+    };
+  }
+};
+var PerformanceMark = class PerformanceMark2 extends PerformanceEntry {
+  static {
+    __name(this, "PerformanceMark");
+  }
+  entryType = "mark";
+  constructor() {
+    super(...arguments);
+  }
+  get duration() {
+    return 0;
+  }
+};
+var PerformanceMeasure = class extends PerformanceEntry {
+  static {
+    __name(this, "PerformanceMeasure");
+  }
+  entryType = "measure";
+};
+var PerformanceResourceTiming = class extends PerformanceEntry {
+  static {
+    __name(this, "PerformanceResourceTiming");
+  }
+  entryType = "resource";
+  serverTiming = [];
+  connectEnd = 0;
+  connectStart = 0;
+  decodedBodySize = 0;
+  domainLookupEnd = 0;
+  domainLookupStart = 0;
+  encodedBodySize = 0;
+  fetchStart = 0;
+  initiatorType = "";
+  name = "";
+  nextHopProtocol = "";
+  redirectEnd = 0;
+  redirectStart = 0;
+  requestStart = 0;
+  responseEnd = 0;
+  responseStart = 0;
+  secureConnectionStart = 0;
+  startTime = 0;
+  transferSize = 0;
+  workerStart = 0;
+  responseStatus = 0;
+};
+var PerformanceObserverEntryList = class {
+  static {
+    __name(this, "PerformanceObserverEntryList");
+  }
+  __unenv__ = true;
+  getEntries() {
+    return [];
+  }
+  getEntriesByName(_name, _type) {
+    return [];
+  }
+  getEntriesByType(type) {
+    return [];
+  }
+};
+var Performance = class {
+  static {
+    __name(this, "Performance");
+  }
+  __unenv__ = true;
+  timeOrigin = _timeOrigin;
+  eventCounts = /* @__PURE__ */ new Map();
+  _entries = [];
+  _resourceTimingBufferSize = 0;
+  navigation = void 0;
+  timing = void 0;
+  timerify(_fn, _options) {
+    throw createNotImplementedError("Performance.timerify");
+  }
+  get nodeTiming() {
+    return nodeTiming;
+  }
+  eventLoopUtilization() {
+    return {};
+  }
+  markResourceTiming() {
+    return new PerformanceResourceTiming("");
+  }
+  onresourcetimingbufferfull = null;
+  now() {
+    if (this.timeOrigin === _timeOrigin) {
+      return _performanceNow();
+    }
+    return Date.now() - this.timeOrigin;
+  }
+  clearMarks(markName) {
+    this._entries = markName ? this._entries.filter((e) => e.name !== markName) : this._entries.filter((e) => e.entryType !== "mark");
+  }
+  clearMeasures(measureName) {
+    this._entries = measureName ? this._entries.filter((e) => e.name !== measureName) : this._entries.filter((e) => e.entryType !== "measure");
+  }
+  clearResourceTimings() {
+    this._entries = this._entries.filter((e) => e.entryType !== "resource" || e.entryType !== "navigation");
+  }
+  getEntries() {
+    return this._entries;
+  }
+  getEntriesByName(name, type) {
+    return this._entries.filter((e) => e.name === name && (!type || e.entryType === type));
+  }
+  getEntriesByType(type) {
+    return this._entries.filter((e) => e.entryType === type);
+  }
+  mark(name, options) {
+    const entry = new PerformanceMark(name, options);
+    this._entries.push(entry);
+    return entry;
+  }
+  measure(measureName, startOrMeasureOptions, endMark) {
+    let start;
+    let end;
+    if (typeof startOrMeasureOptions === "string") {
+      start = this.getEntriesByName(startOrMeasureOptions, "mark")[0]?.startTime;
+      end = this.getEntriesByName(endMark, "mark")[0]?.startTime;
+    } else {
+      start = Number.parseFloat(startOrMeasureOptions?.start) || this.now();
+      end = Number.parseFloat(startOrMeasureOptions?.end) || this.now();
+    }
+    const entry = new PerformanceMeasure(measureName, {
+      startTime: start,
+      detail: {
+        start,
+        end
+      }
+    });
+    this._entries.push(entry);
+    return entry;
+  }
+  setResourceTimingBufferSize(maxSize) {
+    this._resourceTimingBufferSize = maxSize;
+  }
+  addEventListener(type, listener, options) {
+    throw createNotImplementedError("Performance.addEventListener");
+  }
+  removeEventListener(type, listener, options) {
+    throw createNotImplementedError("Performance.removeEventListener");
+  }
+  dispatchEvent(event) {
+    throw createNotImplementedError("Performance.dispatchEvent");
+  }
+  toJSON() {
+    return this;
+  }
+};
+var PerformanceObserver = class {
+  static {
+    __name(this, "PerformanceObserver");
+  }
+  __unenv__ = true;
+  static supportedEntryTypes = [];
+  _callback = null;
+  constructor(callback) {
+    this._callback = callback;
+  }
+  takeRecords() {
+    return [];
+  }
+  disconnect() {
+    throw createNotImplementedError("PerformanceObserver.disconnect");
+  }
+  observe(options) {
+    throw createNotImplementedError("PerformanceObserver.observe");
+  }
+  bind(fn) {
+    return fn;
+  }
+  runInAsyncScope(fn, thisArg, ...args) {
+    return fn.call(thisArg, ...args);
+  }
+  asyncId() {
+    return 0;
+  }
+  triggerAsyncId() {
+    return 0;
+  }
+  emitDestroy() {
+    return this;
+  }
+};
+var performance = globalThis.performance && "addEventListener" in globalThis.performance ? globalThis.performance : new Performance();
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/@cloudflare/unenv-preset/dist/runtime/polyfill/performance.mjs
+if (!("__unenv__" in performance)) {
+  const proto = Performance.prototype;
+  for (const key of Object.getOwnPropertyNames(proto)) {
+    if (key !== "constructor" && !(key in performance)) {
+      const desc = Object.getOwnPropertyDescriptor(proto, key);
+      if (desc) {
+        Object.defineProperty(performance, key, desc);
+      }
+    }
+  }
+}
+globalThis.performance = performance;
+globalThis.Performance = Performance;
+globalThis.PerformanceEntry = PerformanceEntry;
+globalThis.PerformanceMark = PerformanceMark;
+globalThis.PerformanceMeasure = PerformanceMeasure;
+globalThis.PerformanceObserver = PerformanceObserver;
+globalThis.PerformanceObserverEntryList = PerformanceObserverEntryList;
+globalThis.PerformanceResourceTiming = PerformanceResourceTiming;
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/console.mjs
+import { Writable } from "node:stream";
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/mock/noop.mjs
+var noop_default = Object.assign(() => {
+}, { __unenv__: true });
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/console.mjs
+var _console = globalThis.console;
+var _ignoreErrors = true;
+var _stderr = new Writable();
+var _stdout = new Writable();
+var log = _console?.log ?? noop_default;
+var info = _console?.info ?? log;
+var trace = _console?.trace ?? info;
+var debug = _console?.debug ?? log;
+var table = _console?.table ?? log;
+var error = _console?.error ?? log;
+var warn = _console?.warn ?? error;
+var createTask = _console?.createTask ?? /* @__PURE__ */ notImplemented("console.createTask");
+var clear = _console?.clear ?? noop_default;
+var count = _console?.count ?? noop_default;
+var countReset = _console?.countReset ?? noop_default;
+var dir = _console?.dir ?? noop_default;
+var dirxml = _console?.dirxml ?? noop_default;
+var group = _console?.group ?? noop_default;
+var groupEnd = _console?.groupEnd ?? noop_default;
+var groupCollapsed = _console?.groupCollapsed ?? noop_default;
+var profile = _console?.profile ?? noop_default;
+var profileEnd = _console?.profileEnd ?? noop_default;
+var time = _console?.time ?? noop_default;
+var timeEnd = _console?.timeEnd ?? noop_default;
+var timeLog = _console?.timeLog ?? noop_default;
+var timeStamp = _console?.timeStamp ?? noop_default;
+var Console = _console?.Console ?? /* @__PURE__ */ notImplementedClass("console.Console");
+var _times = /* @__PURE__ */ new Map();
+var _stdoutErrorHandler = noop_default;
+var _stderrErrorHandler = noop_default;
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/@cloudflare/unenv-preset/dist/runtime/node/console.mjs
+var workerdConsole = globalThis["console"];
+var {
+  assert,
+  clear: clear2,
+  // @ts-expect-error undocumented public API
+  context,
+  count: count2,
+  countReset: countReset2,
+  // @ts-expect-error undocumented public API
+  createTask: createTask2,
+  debug: debug2,
+  dir: dir2,
+  dirxml: dirxml2,
+  error: error2,
+  group: group2,
+  groupCollapsed: groupCollapsed2,
+  groupEnd: groupEnd2,
+  info: info2,
+  log: log2,
+  profile: profile2,
+  profileEnd: profileEnd2,
+  table: table2,
+  time: time2,
+  timeEnd: timeEnd2,
+  timeLog: timeLog2,
+  timeStamp: timeStamp2,
+  trace: trace2,
+  warn: warn2
+} = workerdConsole;
+Object.assign(workerdConsole, {
+  Console,
+  _ignoreErrors,
+  _stderr,
+  _stderrErrorHandler,
+  _stdout,
+  _stdoutErrorHandler,
+  _times
+});
+var console_default = workerdConsole;
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/wrangler/_virtual_unenv_global_polyfill-@cloudflare-unenv-preset-node-console
+globalThis.console = console_default;
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/process/hrtime.mjs
+var hrtime = /* @__PURE__ */ Object.assign(/* @__PURE__ */ __name(function hrtime2(startTime) {
+  const now = Date.now();
+  const seconds = Math.trunc(now / 1e3);
+  const nanos = now % 1e3 * 1e6;
+  if (startTime) {
+    let diffSeconds = seconds - startTime[0];
+    let diffNanos = nanos - startTime[0];
+    if (diffNanos < 0) {
+      diffSeconds = diffSeconds - 1;
+      diffNanos = 1e9 + diffNanos;
+    }
+    return [diffSeconds, diffNanos];
+  }
+  return [seconds, nanos];
+}, "hrtime"), { bigint: /* @__PURE__ */ __name(function bigint() {
+  return BigInt(Date.now() * 1e6);
+}, "bigint") });
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/process/process.mjs
+import { EventEmitter } from "node:events";
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/tty/read-stream.mjs
+var ReadStream = class {
+  static {
+    __name(this, "ReadStream");
+  }
+  fd;
+  isRaw = false;
+  isTTY = false;
+  constructor(fd) {
+    this.fd = fd;
+  }
+  setRawMode(mode) {
+    this.isRaw = mode;
+    return this;
+  }
+};
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/tty/write-stream.mjs
+var WriteStream = class {
+  static {
+    __name(this, "WriteStream");
+  }
+  fd;
+  columns = 80;
+  rows = 24;
+  isTTY = false;
+  constructor(fd) {
+    this.fd = fd;
+  }
+  clearLine(dir3, callback) {
+    callback && callback();
+    return false;
+  }
+  clearScreenDown(callback) {
+    callback && callback();
+    return false;
+  }
+  cursorTo(x, y, callback) {
+    callback && typeof callback === "function" && callback();
+    return false;
+  }
+  moveCursor(dx, dy, callback) {
+    callback && callback();
+    return false;
+  }
+  getColorDepth(env2) {
+    return 1;
+  }
+  hasColors(count3, env2) {
+    return false;
+  }
+  getWindowSize() {
+    return [this.columns, this.rows];
+  }
+  write(str, encoding, cb) {
+    if (str instanceof Uint8Array) {
+      str = new TextDecoder().decode(str);
+    }
+    try {
+      console.log(str);
+    } catch {
+    }
+    cb && typeof cb === "function" && cb();
+    return false;
+  }
+};
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/process/node-version.mjs
+var NODE_VERSION = "22.14.0";
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/unenv/dist/runtime/node/internal/process/process.mjs
+var Process = class _Process extends EventEmitter {
+  static {
+    __name(this, "Process");
+  }
+  env;
+  hrtime;
+  nextTick;
+  constructor(impl) {
+    super();
+    this.env = impl.env;
+    this.hrtime = impl.hrtime;
+    this.nextTick = impl.nextTick;
+    for (const prop of [...Object.getOwnPropertyNames(_Process.prototype), ...Object.getOwnPropertyNames(EventEmitter.prototype)]) {
+      const value = this[prop];
+      if (typeof value === "function") {
+        this[prop] = value.bind(this);
+      }
+    }
+  }
+  // --- event emitter ---
+  emitWarning(warning, type, code) {
+    console.warn(`${code ? `[${code}] ` : ""}${type ? `${type}: ` : ""}${warning}`);
+  }
+  emit(...args) {
+    return super.emit(...args);
+  }
+  listeners(eventName) {
+    return super.listeners(eventName);
+  }
+  // --- stdio (lazy initializers) ---
+  #stdin;
+  #stdout;
+  #stderr;
+  get stdin() {
+    return this.#stdin ??= new ReadStream(0);
+  }
+  get stdout() {
+    return this.#stdout ??= new WriteStream(1);
+  }
+  get stderr() {
+    return this.#stderr ??= new WriteStream(2);
+  }
+  // --- cwd ---
+  #cwd = "/";
+  chdir(cwd2) {
+    this.#cwd = cwd2;
+  }
+  cwd() {
+    return this.#cwd;
+  }
+  // --- dummy props and getters ---
+  arch = "";
+  platform = "";
+  argv = [];
+  argv0 = "";
+  execArgv = [];
+  execPath = "";
+  title = "";
+  pid = 200;
+  ppid = 100;
+  get version() {
+    return `v${NODE_VERSION}`;
+  }
+  get versions() {
+    return { node: NODE_VERSION };
+  }
+  get allowedNodeEnvironmentFlags() {
+    return /* @__PURE__ */ new Set();
+  }
+  get sourceMapsEnabled() {
+    return false;
+  }
+  get debugPort() {
+    return 0;
+  }
+  get throwDeprecation() {
+    return false;
+  }
+  get traceDeprecation() {
+    return false;
+  }
+  get features() {
+    return {};
+  }
+  get release() {
+    return {};
+  }
+  get connected() {
+    return false;
+  }
+  get config() {
+    return {};
+  }
+  get moduleLoadList() {
+    return [];
+  }
+  constrainedMemory() {
+    return 0;
+  }
+  availableMemory() {
+    return 0;
+  }
+  uptime() {
+    return 0;
+  }
+  resourceUsage() {
+    return {};
+  }
+  // --- noop methods ---
+  ref() {
+  }
+  unref() {
+  }
+  // --- unimplemented methods ---
+  umask() {
+    throw createNotImplementedError("process.umask");
+  }
+  getBuiltinModule() {
+    return void 0;
+  }
+  getActiveResourcesInfo() {
+    throw createNotImplementedError("process.getActiveResourcesInfo");
+  }
+  exit() {
+    throw createNotImplementedError("process.exit");
+  }
+  reallyExit() {
+    throw createNotImplementedError("process.reallyExit");
+  }
+  kill() {
+    throw createNotImplementedError("process.kill");
+  }
+  abort() {
+    throw createNotImplementedError("process.abort");
+  }
+  dlopen() {
+    throw createNotImplementedError("process.dlopen");
+  }
+  setSourceMapsEnabled() {
+    throw createNotImplementedError("process.setSourceMapsEnabled");
+  }
+  loadEnvFile() {
+    throw createNotImplementedError("process.loadEnvFile");
+  }
+  disconnect() {
+    throw createNotImplementedError("process.disconnect");
+  }
+  cpuUsage() {
+    throw createNotImplementedError("process.cpuUsage");
+  }
+  setUncaughtExceptionCaptureCallback() {
+    throw createNotImplementedError("process.setUncaughtExceptionCaptureCallback");
+  }
+  hasUncaughtExceptionCaptureCallback() {
+    throw createNotImplementedError("process.hasUncaughtExceptionCaptureCallback");
+  }
+  initgroups() {
+    throw createNotImplementedError("process.initgroups");
+  }
+  openStdin() {
+    throw createNotImplementedError("process.openStdin");
+  }
+  assert() {
+    throw createNotImplementedError("process.assert");
+  }
+  binding() {
+    throw createNotImplementedError("process.binding");
+  }
+  // --- attached interfaces ---
+  permission = { has: /* @__PURE__ */ notImplemented("process.permission.has") };
+  report = {
+    directory: "",
+    filename: "",
+    signal: "SIGUSR2",
+    compact: false,
+    reportOnFatalError: false,
+    reportOnSignal: false,
+    reportOnUncaughtException: false,
+    getReport: /* @__PURE__ */ notImplemented("process.report.getReport"),
+    writeReport: /* @__PURE__ */ notImplemented("process.report.writeReport")
+  };
+  finalization = {
+    register: /* @__PURE__ */ notImplemented("process.finalization.register"),
+    unregister: /* @__PURE__ */ notImplemented("process.finalization.unregister"),
+    registerBeforeExit: /* @__PURE__ */ notImplemented("process.finalization.registerBeforeExit")
+  };
+  memoryUsage = Object.assign(() => ({
+    arrayBuffers: 0,
+    rss: 0,
+    external: 0,
+    heapTotal: 0,
+    heapUsed: 0
+  }), { rss: /* @__PURE__ */ __name(() => 0, "rss") });
+  // --- undefined props ---
+  mainModule = void 0;
+  domain = void 0;
+  // optional
+  send = void 0;
+  exitCode = void 0;
+  channel = void 0;
+  getegid = void 0;
+  geteuid = void 0;
+  getgid = void 0;
+  getgroups = void 0;
+  getuid = void 0;
+  setegid = void 0;
+  seteuid = void 0;
+  setgid = void 0;
+  setgroups = void 0;
+  setuid = void 0;
+  // internals
+  _events = void 0;
+  _eventsCount = void 0;
+  _exiting = void 0;
+  _maxListeners = void 0;
+  _debugEnd = void 0;
+  _debugProcess = void 0;
+  _fatalException = void 0;
+  _getActiveHandles = void 0;
+  _getActiveRequests = void 0;
+  _kill = void 0;
+  _preload_modules = void 0;
+  _rawDebug = void 0;
+  _startProfilerIdleNotifier = void 0;
+  _stopProfilerIdleNotifier = void 0;
+  _tickCallback = void 0;
+  _disconnect = void 0;
+  _handleQueue = void 0;
+  _pendingMessage = void 0;
+  _channel = void 0;
+  _send = void 0;
+  _linkedBinding = void 0;
+};
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/@cloudflare/unenv-preset/dist/runtime/node/process.mjs
+var globalProcess = globalThis["process"];
+var getBuiltinModule = globalProcess.getBuiltinModule;
+var workerdProcess = getBuiltinModule("node:process");
+var unenvProcess = new Process({
+  env: globalProcess.env,
+  hrtime,
+  // `nextTick` is available from workerd process v1
+  nextTick: workerdProcess.nextTick
+});
+var { exit, features, platform } = workerdProcess;
+var {
+  _channel,
+  _debugEnd,
+  _debugProcess,
+  _disconnect,
+  _events,
+  _eventsCount,
+  _exiting,
+  _fatalException,
+  _getActiveHandles,
+  _getActiveRequests,
+  _handleQueue,
+  _kill,
+  _linkedBinding,
+  _maxListeners,
+  _pendingMessage,
+  _preload_modules,
+  _rawDebug,
+  _send,
+  _startProfilerIdleNotifier,
+  _stopProfilerIdleNotifier,
+  _tickCallback,
+  abort,
+  addListener,
+  allowedNodeEnvironmentFlags,
+  arch,
+  argv,
+  argv0,
+  assert: assert2,
+  availableMemory,
+  binding,
+  channel,
+  chdir,
+  config,
+  connected,
+  constrainedMemory,
+  cpuUsage,
+  cwd,
+  debugPort,
+  disconnect,
+  dlopen,
+  domain,
+  emit,
+  emitWarning,
+  env,
+  eventNames,
+  execArgv,
+  execPath,
+  exitCode,
+  finalization,
+  getActiveResourcesInfo,
+  getegid,
+  geteuid,
+  getgid,
+  getgroups,
+  getMaxListeners,
+  getuid,
+  hasUncaughtExceptionCaptureCallback,
+  hrtime: hrtime3,
+  initgroups,
+  kill,
+  listenerCount,
+  listeners,
+  loadEnvFile,
+  mainModule,
+  memoryUsage,
+  moduleLoadList,
+  nextTick,
+  off,
+  on,
+  once,
+  openStdin,
+  permission,
+  pid,
+  ppid,
+  prependListener,
+  prependOnceListener,
+  rawListeners,
+  reallyExit,
+  ref,
+  release,
+  removeAllListeners,
+  removeListener,
+  report,
+  resourceUsage,
+  send,
+  setegid,
+  seteuid,
+  setgid,
+  setgroups,
+  setMaxListeners,
+  setSourceMapsEnabled,
+  setuid,
+  setUncaughtExceptionCaptureCallback,
+  sourceMapsEnabled,
+  stderr,
+  stdin,
+  stdout,
+  throwDeprecation,
+  title,
+  traceDeprecation,
+  umask,
+  unref,
+  uptime,
+  version,
+  versions
+} = unenvProcess;
+var _process = {
+  abort,
+  addListener,
+  allowedNodeEnvironmentFlags,
+  hasUncaughtExceptionCaptureCallback,
+  setUncaughtExceptionCaptureCallback,
+  loadEnvFile,
+  sourceMapsEnabled,
+  arch,
+  argv,
+  argv0,
+  chdir,
+  config,
+  connected,
+  constrainedMemory,
+  availableMemory,
+  cpuUsage,
+  cwd,
+  debugPort,
+  dlopen,
+  disconnect,
+  emit,
+  emitWarning,
+  env,
+  eventNames,
+  execArgv,
+  execPath,
+  exit,
+  finalization,
+  features,
+  getBuiltinModule,
+  getActiveResourcesInfo,
+  getMaxListeners,
+  hrtime: hrtime3,
+  kill,
+  listeners,
+  listenerCount,
+  memoryUsage,
+  nextTick,
+  on,
+  off,
+  once,
+  pid,
+  platform,
+  ppid,
+  prependListener,
+  prependOnceListener,
+  rawListeners,
+  release,
+  removeAllListeners,
+  removeListener,
+  report,
+  resourceUsage,
+  setMaxListeners,
+  setSourceMapsEnabled,
+  stderr,
+  stdin,
+  stdout,
+  title,
+  throwDeprecation,
+  traceDeprecation,
+  umask,
+  uptime,
+  version,
+  versions,
+  // @ts-expect-error old API
+  domain,
+  initgroups,
+  moduleLoadList,
+  reallyExit,
+  openStdin,
+  assert: assert2,
+  binding,
+  send,
+  exitCode,
+  channel,
+  getegid,
+  geteuid,
+  getgid,
+  getgroups,
+  getuid,
+  setegid,
+  seteuid,
+  setgid,
+  setgroups,
+  setuid,
+  permission,
+  mainModule,
+  _events,
+  _eventsCount,
+  _exiting,
+  _maxListeners,
+  _debugEnd,
+  _debugProcess,
+  _fatalException,
+  _getActiveHandles,
+  _getActiveRequests,
+  _kill,
+  _preload_modules,
+  _rawDebug,
+  _startProfilerIdleNotifier,
+  _stopProfilerIdleNotifier,
+  _tickCallback,
+  _disconnect,
+  _handleQueue,
+  _pendingMessage,
+  _channel,
+  _send,
+  _linkedBinding
+};
+var process_default = _process;
+
+// ../../.npm/_npx/32026684e21afda6/node_modules/wrangler/_virtual_unenv_global_polyfill-@cloudflare-unenv-preset-node-process
+globalThis.process = process_default;
+
+// src/sources.js
+var SOURCES = [
+  // === PRESSE NATIONALE FR ===
+  {
+    name: "Le Monde",
+    url: "https://www.lemonde.fr/rss/une.xml",
+    lang: "fr",
+    category: "presse_nationale",
+    // Le Monde sert parfois le contenu tronqué → forcer le fetch
+    forceFullFetch: true,
+    // Bloquer les cookies de compteur métré
+    clearCookies: true
+  },
+  {
+    name: "Le Figaro",
+    url: "https://www.lefigaro.fr/rss/figaro_actualites.xml",
+    lang: "fr",
+    category: "presse_nationale",
+    forceFullFetch: true
+  },
+  {
+    name: "Les \xC9chos",
+    url: "https://syndication.lesechos.fr/rss/rss_une.xml",
+    lang: "fr",
+    category: "economie",
+    forceFullFetch: true
+  },
+  {
+    name: "Lib\xE9ration",
+    url: "https://www.liberation.fr/rss/",
+    lang: "fr",
+    category: "presse_nationale"
+  },
+  {
+    name: "La Croix",
+    url: "https://www.la-croix.com/rss/une.xml",
+    lang: "fr",
+    category: "presse_nationale"
+  },
+  {
+    name: "France Info",
+    url: "https://www.francetvinfo.fr/titres.rss",
+    lang: "fr",
+    category: "audiovisuel"
+  },
+  {
+    name: "France Inter",
+    url: "https://www.radiofrance.fr/franceinter/podcasts/rss",
+    lang: "fr",
+    category: "audiovisuel"
+  },
+  {
+    name: "Mediapart",
+    url: "https://www.mediapart.fr/articles/feed",
+    lang: "fr",
+    category: "presse_numerique"
+  },
+  // === ECONOMIE & TECH ===
+  {
+    name: "La Tribune",
+    url: "https://www.latribune.fr/rss/rubriques/economie.html",
+    lang: "fr",
+    category: "economie"
+  },
+  {
+    name: "JDN (Journal du Net)",
+    url: "https://www.journaldunet.com/rss/",
+    lang: "fr",
+    category: "tech"
+  },
+  {
+    name: "Silicon",
+    url: "https://www.silicon.fr/feed",
+    lang: "fr",
+    category: "tech"
+  },
+  // === INTERNATIONAL FR ===
+  {
+    name: "Courrier International",
+    url: "https://www.courrierinternational.com/feed",
+    lang: "fr",
+    category: "international"
+  },
+  {
+    name: "RFI (Radio France Internationale)",
+    url: "https://www.rfi.fr/fr/rss",
+    lang: "fr",
+    category: "international"
+  },
+  {
+    name: "Euronews (FR)",
+    url: "https://www.euronews.com/rss?format=mrss&lang=fr",
+    lang: "fr",
+    category: "international"
+  },
+  // === ANGLOPHONE (poches internationales) ===
+  {
+    name: "Reuters",
+    url: "https://feeds.reuters.com/reuters/topNews",
+    lang: "en",
+    category: "international_en"
+  },
+  {
+    name: "BBC News",
+    url: "http://feeds.bbci.co.uk/news/rss.xml",
+    lang: "en",
+    category: "international_en"
+  },
+  {
+    name: "The Guardian",
+    url: "https://www.theguardian.com/world/rss",
+    lang: "en",
+    category: "international_en"
+  }
+];
+var ANTI_PAYWALL_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+  "Referer": "https://www.google.com/",
+  "X-Forwarded-For": "66.249.66.1",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+  // Ne jamais envoyer de cookies (contournement des compteurs métrés)
+  "Cookie": ""
+};
+var ALT_HEADERS_FACEBOOK = {
+  "User-Agent": "Mozilla/5.0 (compatible; FacebookBot/1.0; +http://www.facebook.com/externalhit_uatext.php)",
+  "Referer": "https://www.facebook.com/",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+  "Cookie": ""
+};
+
+// src/fetcher.js
+function parseRSS(xmlString) {
+  const items = [];
+  const clean = xmlString.replace(/xmlns[:\w]*="[^"]*"/g, "");
+  const itemRegex = /<(?:item|entry)>([\s\S]*?)<\/(?:item|entry)>/gi;
+  let match;
+  while ((match = itemRegex.exec(clean)) !== null) {
+    const block = match[1];
+    const item = {};
+    const titleMatch = block.match(/<title(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+    if (titleMatch) item.title = titleMatch[1].trim();
+    const linkMatch = block.match(/<link[^>]*href="([^"]+)"[^>]*\/?>/i) || block.match(/<link[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
+    if (linkMatch) item.link = linkMatch[1].trim();
+    const descMatch = block.match(/<(?:description|summary)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:description|summary)>/i);
+    if (descMatch) item.description = descMatch[1].trim();
+    const contentMatch = block.match(/<content(?:\s[^>]*)?>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
+    if (contentMatch) item.fullContent = contentMatch[1].trim();
+    const dateMatch = block.match(/<(?:pubDate|published|updated|dc:date)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:pubDate|published|updated|dc:date)>/i);
+    if (dateMatch) item.pubDate = dateMatch[1].trim();
+    const authorMatch = block.match(/<(?:author|dc:creator)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:author|dc:creator)>/i);
+    if (authorMatch) item.author = authorMatch[1].trim().replace(/<[^>]*>/g, "");
+    if (item.title && item.link) {
+      items.push(item);
+    }
+  }
+  return items;
+}
+__name(parseRSS, "parseRSS");
+async function fetchAllFeeds(maxArticles) {
+  const allArticles = [];
+  const errors = [];
+  const batchSize = 5;
+  for (let i = 0; i < SOURCES.length; i += batchSize) {
+    const batch = SOURCES.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (source) => {
+        try {
+          const response = await fetch(source.url, {
+            headers: {
+              "User-Agent": "RevueDePresse/1.0 (RSS Aggregator)",
+              "Accept": "application/rss+xml, application/xml, text/xml"
+            },
+            signal: AbortSignal.timeout(15e3)
+            // 15s timeout
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const xml = await response.text();
+          const items = parseRSS(xml);
+          return items.map((item) => ({
+            ...item,
+            sourceName: source.name,
+            sourceCategory: source.category,
+            sourceLang: source.lang,
+            forceFullFetch: source.forceFullFetch || false,
+            clearCookies: source.clearCookies || false
+          }));
+        } catch (err) {
+          throw new Error(`${source.name}: ${err.message}`);
+        }
+      })
+    );
+    for (let j = 0; j < results.length; j++) {
+      if (results[j].status === "fulfilled") {
+        allArticles.push(...results[j].value);
+      } else {
+        errors.push(results[j].reason.message);
+      }
+    }
+  }
+  allArticles.sort((a, b) => {
+    const dateA = a.pubDate ? new Date(a.pubDate) : /* @__PURE__ */ new Date(0);
+    const dateB = b.pubDate ? new Date(b.pubDate) : /* @__PURE__ */ new Date(0);
+    return dateB - dateA;
+  });
+  const limited = allArticles.slice(0, maxArticles || 25);
+  return { articles: limited, totalFound: allArticles.length, errors };
+}
+__name(fetchAllFeeds, "fetchAllFeeds");
+async function fetchFullArticle(url, sourceName = "") {
+  let html = null;
+  let method = "none";
+  try {
+    const resp = await fetch(url, {
+      headers: { ...ANTI_PAYWALL_HEADERS },
+      signal: AbortSignal.timeout(15e3)
+    });
+    if (resp.ok) {
+      html = await resp.text();
+      method = "googlebot";
+    }
+  } catch (e) {
+  }
+  if (!html || html.length < 1e3) {
+    try {
+      const resp = await fetch(url, {
+        headers: { ...ALT_HEADERS_FACEBOOK },
+        signal: AbortSignal.timeout(15e3)
+      });
+      if (resp.ok) {
+        const fbHtml = await resp.text();
+        if (fbHtml.length > html?.length) {
+          html = fbHtml;
+          method = "facebookbot";
+        }
+      }
+    } catch (e) {
+    }
+  }
+  if (!html || html.length < 1e3) {
+    try {
+      const resp = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
+        headers: {
+          "Accept": "text/plain",
+          "X-Return-Format": "text"
+        },
+        signal: AbortSignal.timeout(2e4)
+      });
+      if (resp.ok) {
+        const jinaText = await resp.text();
+        return {
+          text: jinaText,
+          method: "jina",
+          isMarkdown: true,
+          success: true
+        };
+      }
+    } catch (e) {
+    }
+  }
+  if (!html) {
+    return { text: null, method: "failed", success: false };
+  }
+  return {
+    html,
+    method,
+    isMarkdown: false,
+    success: true
+  };
+}
+__name(fetchFullArticle, "fetchFullArticle");
+
+// src/extractor.js
+function extractTextFromHTML(html, maxWords = 1500) {
+  let bestContent = "";
+  let bestSelector = "none";
+  const articleContent = extractElement(html, "article");
+  if (articleContent.length > bestContent.length) {
+    bestContent = articleContent;
+    bestSelector = "article";
+  }
+  const mainContent = extractElement(html, "main");
+  if (mainContent.length > bestContent.length) {
+    bestContent = mainContent;
+    bestSelector = "main";
+  }
+  const roleContent = extractByAttr(html, "role", "article");
+  if (roleContent.length > bestContent.length) {
+    bestContent = roleContent;
+    bestSelector = "role=article";
+  }
+  if (bestContent.length < 300) {
+    const bodyContent = extractBody(html);
+    if (bodyContent.length > bestContent.length) {
+      bestContent = bodyContent;
+      bestSelector = "body";
+    }
+  }
+  let text = cleanText(bestContent);
+  if (maxWords) {
+    text = truncateToWords(text, maxWords);
+  }
+  return {
+    text,
+    length: text.length,
+    words: text.split(/\s+/).filter(Boolean).length,
+    selector: bestSelector
+  };
+}
+__name(extractTextFromHTML, "extractTextFromHTML");
+function extractElement(html, tagName) {
+  let content = "";
+  let depth = 0;
+  let capturing = false;
+  const rewriter = new HTMLRewriter().on(tagName, {
+    element() {
+      if (!capturing) {
+        capturing = true;
+        depth = 1;
+      } else {
+        depth++;
+      }
+    },
+    text(text) {
+      if (capturing) {
+        content += text.text;
+      }
+    }
+  }).on("*", {
+    element() {
+      if (capturing) {
+        depth++;
+      }
+    },
+    text(text) {
+      if (capturing) {
+        content += text.text;
+      }
+    }
+  });
+  const response = new Response(html, { headers: { "Content-Type": "text/html" } });
+  const transformed = rewriter.transform(response);
+  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i");
+  const match = html.match(regex);
+  if (match) {
+    return stripTags(match[1]);
+  }
+  return content;
+}
+__name(extractElement, "extractElement");
+function extractByAttr(html, attrName, attrValue) {
+  const regex = new RegExp(`<[^>]+\\s${attrName}=["']${attrValue}["'][^>]*>([\\s\\S]*?)</[^>]+>`, "i");
+  const match = html.match(regex);
+  if (match) {
+    return stripTags(match[1]);
+  }
+  return "";
+}
+__name(extractByAttr, "extractByAttr");
+function extractBody(html) {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (!bodyMatch) return stripTags(html);
+  let body = bodyMatch[1];
+  const removePatterns = [
+    /<script[\s\S]*?<\/script>/gi,
+    /<style[\s\S]*?<\/style>/gi,
+    /<nav[\s\S]*?<\/nav>/gi,
+    /<footer[\s\S]*?<\/footer>/gi,
+    /<header[\s\S]*?<\/header>/gi,
+    /<aside[\s\S]*?<\/aside>/gi,
+    /<noscript[\s\S]*?<\/noscript>/gi,
+    /<form[\s\S]*?<\/form>/gi,
+    /<svg[\s\S]*?<\/svg>/gi,
+    /<!--[\s\S]*?-->/g,
+    /<[^>]*class="[^"]*(?:share|social|newsletter|popup|banner|ad-|advert|cookie|consent|paywall|subscription|premium|related|comments)[^"]*"[^>]*>[\s\S]*?<\/[^>]+>/gi
+  ];
+  for (const pattern of removePatterns) {
+    body = body.replace(pattern, "");
+  }
+  return stripTags(body);
+}
+__name(extractBody, "extractBody");
+function stripTags(html) {
+  return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&laquo;/g, "\xAB").replace(/&raquo;/g, "\xBB").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&hellip;/g, "\u2026").replace(/&rsquo;/g, "'").replace(/&lsquo;/g, "'").replace(/&#\d+;/g, "").replace(/[ \t]+/g, " ").replace(/\n\s*\n/g, "\n\n");
+}
+__name(stripTags, "stripTags");
+function cleanText(text) {
+  return text.split("\n").map((line) => line.trim()).filter((line) => {
+    if (line.length < 30) return false;
+    if (line.match(/^\{|\}$|function|var |let |const |\.css|\.js|onclick|display:/)) return false;
+    return true;
+  }).join("\n").trim();
+}
+__name(cleanText, "cleanText");
+function truncateToWords(text, maxWords) {
+  const words = text.split(/\s+/);
+  if (words.length <= maxWords) return text;
+  let truncated = words.slice(0, maxWords).join(" ");
+  const lastSentence = truncated.lastIndexOf(".");
+  const lastQuestion = truncated.lastIndexOf("?");
+  const lastExclam = truncated.lastIndexOf("!");
+  const lastPunct = Math.max(lastSentence, lastQuestion, lastExclam);
+  if (lastPunct > maxWords * 3) {
+    truncated = truncated.substring(0, lastPunct + 1);
+  }
+  return truncated;
+}
+__name(truncateToWords, "truncateToWords");
+function isPaywallPage(text) {
+  if (!text || text.length < 200) return true;
+  const paywallIndicators = [
+    /vous.*(?:abonn|inscriv|souscri)/i,
+    /cet article est (?:réservé|protégé|payant)/i,
+    /pour lire la suite.*(?:abonn)/i,
+    /subscribe to continue/i,
+    /register to read/i,
+    /pour continuer la lecture/i,
+    /article (?:réservé aux|en accès restreint)/i
+  ];
+  const firstLines = text.substring(0, 500);
+  return paywallIndicators.some((pattern) => pattern.test(firstLines));
+}
+__name(isPaywallPage, "isPaywallPage");
+
+// src/ai.js
+var GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+var MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
+var SYSTEM_PROMPT = `Tu es un journaliste analyste exp\xE9riment\xE9, sp\xE9cialis\xE9 dans la veille presse francophone et internationale.
+
+Ta mission : produire une revue de presse quotidienne de haute qualit\xE9, structur\xE9e et insight\xE9e.
+
+R\xC8GLES STRICTES :
+1. R\xE9sume chaque article en 2-3 phrases maximum
+2. Regroupe les articles par TH\xC8ME (pas par source)
+3. Identifie les TENDANCES et les LIENS entre les articles
+4. Mets en \xE9vidence les informations les plus importantes
+5. Sois neutre et factuel \u2014 pas d'opinion personnelle
+6. Utilise un fran\xE7ais soutenu mais accessible
+7. Si un article est en anglais, r\xE9sume-le en fran\xE7ais
+
+FORMAT DE SORTIE (obligatoire) :
+
+\u{1F4CC} GRANDS TITRES DU JOUR
+[Liste des 3-5 informations les plus marquantes, chacune en 1 ligne]
+
+---
+
+\u{1F4F0} ANALYSE TH\xC9MATIQUE
+
+**[TH\xC8ME 1]** (ex: Politique fran\xE7aise, \xC9conomie, Technologie, International, etc.)
+\u2022 **Titre article** (*Source*) : R\xE9sum\xE9 en 2-3 phrases
+\u2022 **Titre article** (*Source*) : R\xE9sum\xE9 en 2-3 phrases
+
+**[TH\xC8ME 2]**
+\u2022 **Titre article** (*Source*) : R\xE9sum\xE9 en 2-3 phrases
+
+[... continuer par th\xE8me ...]
+
+---
+
+\u{1F50D} POINTS CL\xC9S & TENDANCES
+[Analyse transversale de 3-5 points : corr\xE9lations entre articles, \xE9volutions notables, contradictions entre sources, enjeux sous-jacents]
+
+---
+
+\u{1F4CA} CHIFFRES CL\xC9S
+[Si des chiffres marquants sont mentionn\xE9s dans les articles, les lister ici]`;
+async function generatePressReview(articles, env2) {
+  const provider = env2.AI_PROVIDER || "groq";
+  const userContent = buildUserPrompt(articles);
+  const providers = getProviders(env2, provider);
+  for (const p of providers) {
+    try {
+      let result;
+      if (p.name === "WorkersAI") {
+        result = await callWorkersAI(env2, SYSTEM_PROMPT, userContent);
+      } else {
+        result = await callAI(p.endpoint, p.model, p.apiKey, SYSTEM_PROMPT, userContent);
+      }
+      return {
+        content: result,
+        provider: p.name,
+        model: p.model,
+        success: true
+      };
+    } catch (err) {
+      console.error(`Provider ${p.name} \xE9chou\xE9: ${err.message}`);
+    }
+  }
+  return {
+    content: generateRuleBasedReview(articles),
+    provider: "rule-based-fallback",
+    model: "none",
+    success: true,
+    isFallback: true
+  };
+}
+__name(generatePressReview, "generatePressReview");
+function buildUserPrompt(articles) {
+  let prompt = `Voici les articles collect\xE9s ce matin. Produis une revue de presse compl\xE8te.
+
+`;
+  prompt += `--- D\xC9BUT DES ARTICLES ---
+
+`;
+  for (let i = 0; i < articles.length; i++) {
+    const a = articles[i];
+    prompt += `ARTICLE ${i + 1}:
+`;
+    prompt += `Source: ${a.sourceName} (${a.sourceCategory})
+`;
+    prompt += `Titre: ${a.title}
+`;
+    if (a.author) prompt += `Auteur: ${a.author}
+`;
+    if (a.pubDate) prompt += `Date: ${a.pubDate}
+`;
+    prompt += `Contenu:
+${a.extractedText || a.description || "(contenu non disponible)"}
+
+`;
+    prompt += `---
+
+`;
+  }
+  prompt += `--- FIN DES ARTICLES ---
+
+`;
+  prompt += `Rappel : Produis la revue de presse en suivant le format exact demand\xE9 dans tes instructions syst\xE8me.`;
+  return prompt;
+}
+__name(buildUserPrompt, "buildUserPrompt");
+async function callAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 6e3
+    }),
+    signal: AbortSignal.timeout(6e4)
+    // 60s timeout
+  });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorBody}`);
+  }
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+__name(callAI, "callAI");
+async function callWorkersAI(env2, systemPrompt, userPrompt) {
+  if (!env2.AI) {
+    throw new Error("Workers AI binding non configur\xE9");
+  }
+  const combined = `${systemPrompt}
+
+${userPrompt}`;
+  const response = await env2.AI.run(
+    "@cf/meta/llama-3.1-8b-instruct",
+    // Modèle léger pour économiser les neurons
+    {
+      prompt: combined,
+      max_tokens: 4e3,
+      temperature: 0.3
+    }
+  );
+  return response.response;
+}
+__name(callWorkersAI, "callWorkersAI");
+function getProviders(env2, preferred) {
+  const providers = [];
+  if (preferred === "groq" && env2.GROQ_API_KEY) {
+    providers.push({
+      name: "Groq",
+      endpoint: GROQ_ENDPOINT,
+      model: "llama-3.3-70b-versatile",
+      apiKey: env2.GROQ_API_KEY
+    });
+  } else if (preferred === "mistral" && env2.MISTRAL_API_KEY) {
+    providers.push({
+      name: "Mistral",
+      endpoint: MISTRAL_ENDPOINT,
+      model: "mistral-large-latest",
+      apiKey: env2.MISTRAL_API_KEY
+    });
+  } else if (preferred === "workersai") {
+    providers.push({
+      name: "WorkersAI",
+      endpoint: null,
+      // Géré séparément
+      model: "@cf/meta/llama-3.1-8b-instruct",
+      apiKey: null
+    });
+  }
+  if (preferred !== "mistral" && env2.MISTRAL_API_KEY) {
+    providers.push({
+      name: "Mistral",
+      endpoint: MISTRAL_ENDPOINT,
+      model: "mistral-large-latest",
+      apiKey: env2.MISTRAL_API_KEY
+    });
+  }
+  if (preferred !== "groq" && env2.GROQ_API_KEY) {
+    providers.push({
+      name: "Groq",
+      endpoint: GROQ_ENDPOINT,
+      model: "llama-3.3-70b-versatile",
+      apiKey: env2.GROQ_API_KEY
+    });
+  }
+  if (preferred !== "workersai") {
+    providers.push({
+      name: "WorkersAI",
+      endpoint: null,
+      model: "@cf/meta/llama-3.1-8b-instruct",
+      apiKey: null
+    });
+  }
+  return providers;
+}
+__name(getProviders, "getProviders");
+function generateRuleBasedReview(articles) {
+  const lines = [];
+  lines.push("\u{1F4CC} GRANDS TITRES DU JOUR\n");
+  const headlines = articles.slice(0, 5);
+  for (const a of headlines) {
+    lines.push(`\u2022 ${a.title} (*${a.sourceName}*)`);
+  }
+  lines.push("\n---\n");
+  lines.push("\u{1F4F0} ARTICLES DU JOUR\n");
+  const grouped = {};
+  for (const a of articles) {
+    const cat = a.sourceCategory || "Autre";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(a);
+  }
+  for (const [cat, items] of Object.entries(grouped)) {
+    lines.push(`
+**${cat}**`);
+    for (const a of items) {
+      lines.push(`\u2022 **${a.title}** (*${a.sourceName}*)`);
+      if (a.description) {
+        const desc = a.description.replace(/<[^>]*>/g, "").substring(0, 200);
+        lines.push(`  ${desc}...`);
+      }
+      if (a.link) lines.push(`  [Lire l'article](${a.link})`);
+    }
+  }
+  lines.push("\n---\n");
+  lines.push("\u26A0\uFE0F *Cette revue de presse a \xE9t\xE9 g\xE9n\xE9r\xE9e en mode d\xE9grad\xE9 (IA indisponible). Les r\xE9sum\xE9s sont des extraits des descriptions RSS.*");
+  return lines.join("\n");
+}
+__name(generateRuleBasedReview, "generateRuleBasedReview");
+
+// src/email.js
+var RESEND_ENDPOINT = "https://api.resend.com/emails";
+function buildEmailHTML(review, articles, date) {
+  const dateStr = date.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "Europe/Paris"
+  });
+  const articleCount = articles.length;
+  const sourceCount = [...new Set(articles.map((a) => a.sourceName))].length;
+  const reviewHTML = markdownToHTML(review);
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 680px; margin: 0 auto; padding: 20px; background: #f8f9fa; }
+    .container { background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #ffffff; padding: 30px 30px 25px; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .header .date { margin: 8px 0 0; font-size: 14px; opacity: 0.85; }
+    .header .stats { margin-top: 12px; display: flex; gap: 20px; font-size: 13px; opacity: 0.9; }
+    .header .stats span { display: inline-flex; align-items: center; gap: 5px; }
+    .content { padding: 25px 30px 30px; }
+    .content h2 { color: #1a1a2e; font-size: 18px; margin: 25px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e94560; }
+    .content h2:first-child { margin-top: 0; }
+    .content h3 { color: #0f3460; font-size: 15px; margin: 18px 0 8px; }
+    .content p { margin: 8px 0; font-size: 14px; color: #333; }
+    .content ul { margin: 8px 0; padding-left: 20px; }
+    .content li { margin: 6px 0; font-size: 14px; color: #333; }
+    .content strong { color: #1a1a2e; }
+    .content em { color: #666; font-size: 13px; }
+    .content hr { border: none; border-top: 1px solid #eee; margin: 25px 0; }
+    .content a { color: #e94560; text-decoration: none; }
+    .content a:hover { text-decoration: underline; }
+    .provider-badge { display: inline-block; background: #f0f0f0; color: #666; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-top: 15px; }
+    .fallback-notice { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 20px 0; font-size: 13px; color: #856404; border-radius: 0 4px 4px 0; }
+    .footer { background: #f8f9fa; padding: 15px 30px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #eee; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Revue de Presse</h1>
+      <div class="date">${dateStr}</div>
+      <div class="stats">
+        <span>${articleCount} articles</span>
+        <span>${sourceCount} sources</span>
+      </div>
+    </div>
+    <div class="content">
+      ${reviewHTML}
+    </div>
+    <div class="footer">
+      Revue de Presse automatique \u2014 Cloudflare Workers \u2014 ${dateStr}
+    </div>
+  </div>
+</body>
+</html>`;
+  return html;
+}
+__name(buildEmailHTML, "buildEmailHTML");
+function markdownToHTML(md) {
+  if (!md) return "<p>Aucun contenu g\xE9n\xE9r\xE9.</p>";
+  let html = md;
+  html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  html = html.replace(/^---$/gm, "<hr>");
+  html = html.replace(/^#### (.+)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+  html = html.replace(/^• (.+)$/gm, "<li>$1</li>");
+  html = html.replace(/^(\-|\*) (.+)$/gm, "<li>$2</li>");
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  html = html.replace(/^(?!<[a-z]|$)(.+)$/gm, "<p>$1</p>");
+  html = html.replace(/<p>\s*<\/p>/g, "");
+  return html;
+}
+__name(markdownToHTML, "markdownToHTML");
+async function sendEmail(env2, subject, htmlContent) {
+  const apiKey = env2.RESEND_API_KEY;
+  const to = env2.DESTINATION_EMAIL;
+  if (!apiKey) {
+    throw new Error("RESEND_API_KEY non configur\xE9e");
+  }
+  if (!to) {
+    throw new Error("DESTINATION_EMAIL non configur\xE9");
+  }
+  const response = await fetch(RESEND_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: "Revue de Presse <onboarding@resend.dev>",
+      to: [to],
+      subject,
+      html: htmlContent
+    }),
+    signal: AbortSignal.timeout(3e4)
+  });
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Resend HTTP ${response.status}: ${errorBody}`);
+  }
+  const data = await response.json();
+  return data;
+}
+__name(sendEmail, "sendEmail");
+function buildSubject(date) {
+  const dateStr = date.toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long"
+  });
+  return `Revue de Presse \u2014 ${dateStr}`;
+}
+__name(buildSubject, "buildSubject");
+
+// src/pipeline.js
+var KV_KEY_ARTICLES = "pipeline:articles";
+var KV_KEY_REVIEW = "pipeline:review";
+var KV_KEY_STATUS = "pipeline:status";
+var KV_KEY_ERRORS = "pipeline:errors";
+async function phaseFetch(env2, eventTime) {
+  const status = { phase: "fetch", startedAt: eventTime.toISOString() };
+  const errors = [];
+  try {
+    const maxArticles = parseInt(env2.MAX_ARTICLES) || 25;
+    const maxWords = parseInt(env2.MAX_WORDS_PER_ARTICLE) || 1500;
+    status.step = "rss_fetch";
+    const feedResult = await fetchAllFeeds(maxArticles * 2);
+    status.foundInFeeds = feedResult.totalFound;
+    errors.push(...feedResult.errors);
+    status.step = "article_extraction";
+    const processedArticles = [];
+    for (const article of feedResult.articles) {
+      let extractedText = "";
+      if (article.fullContent && article.fullContent.split(/\s+/).length > 100) {
+        extractedText = article.fullContent.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().substring(0, maxWords * 8);
+      }
+      if (!extractedText || extractedText.split(/\s+/).length < 100) {
+        const result = await fetchFullArticle(article.link, article.sourceName);
+        if (result.success) {
+          if (result.isMarkdown) {
+            extractedText = result.text;
+            article.extractionMethod = result.method;
+          } else if (result.html) {
+            const extraction = extractTextFromHTML(result.html, maxWords);
+            extractedText = extraction.text;
+            article.extractionMethod = result.method;
+            if (isPaywallPage(extractedText)) {
+              article.extractionMethod += "+paywall_detected";
+            }
+          }
+        }
+      }
+      if (extractedText && extractedText.split(/\s+/).length > 30) {
+        article.extractedText = extractedText;
+        article.extractedWords = extractedText.split(/\s+/).length;
+        processedArticles.push(article);
+      }
+      if (processedArticles.length >= maxArticles) break;
+    }
+    status.step = "kv_store";
+    await env2.CACHE.put(KV_KEY_ARTICLES, JSON.stringify({
+      date: eventTime.toISOString(),
+      articles: processedArticles,
+      meta: {
+        total: processedArticles.length,
+        sources: [...new Set(processedArticles.map((a) => a.sourceName))],
+        errors
+      }
+    }), { expirationTtl: 3600 });
+    status.success = true;
+    status.articlesExtracted = processedArticles.length;
+    status.sourcesUsed = [...new Set(processedArticles.map((a) => a.sourceName))];
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+    errors.push(`Phase FETCH: ${err.message}`);
+  }
+  await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+  await env2.CACHE.put(KV_KEY_ERRORS, JSON.stringify(errors), { expirationTtl: 86400 });
+  return status;
+}
+__name(phaseFetch, "phaseFetch");
+async function phaseAnalyze(env2, eventTime) {
+  const status = { phase: "analyze", startedAt: eventTime.toISOString() };
+  try {
+    status.step = "kv_read";
+    const articlesData = await env2.CACHE.get(KV_KEY_ARTICLES);
+    if (!articlesData) {
+      status.success = false;
+      status.error = "Aucun article trouv\xE9 en KV. La Phase 1 a-t-elle bien fonctionn\xE9 ?";
+      await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+      return status;
+    }
+    const { articles, meta } = JSON.parse(articlesData);
+    if (articles.length === 0) {
+      status.success = false;
+      status.error = "0 article extrait pendant la Phase 1.";
+      await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+      return status;
+    }
+    status.articlesFound = articles.length;
+    status.step = "ai_call";
+    const result = await generatePressReview(articles, env2);
+    status.step = "kv_store_review";
+    await env2.CACHE.put(KV_KEY_REVIEW, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+      model: result.model,
+      isFallback: result.isFallback || false,
+      meta
+    }), { expirationTtl: 3600 });
+    status.success = true;
+    status.provider = result.provider;
+    status.model = result.model;
+    status.isFallback = result.isFallback || false;
+    status.reviewLength = result.content.length;
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+  await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+__name(phaseAnalyze, "phaseAnalyze");
+async function phaseDeliver(env2, eventTime) {
+  const status = { phase: "deliver", startedAt: eventTime.toISOString() };
+  try {
+    status.step = "kv_read_review";
+    const reviewData = await env2.CACHE.get(KV_KEY_REVIEW);
+    if (!reviewData) {
+      status.success = false;
+      status.error = "Aucune revue trouv\xE9e en KV. La Phase 2 a-t-elle bien fonctionn\xE9 ?";
+      await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+      return status;
+    }
+    const review = JSON.parse(reviewData);
+    const articlesData = await env2.CACHE.get(KV_KEY_ARTICLES);
+    const articles = articlesData ? JSON.parse(articlesData).articles : [];
+    status.step = "build_email";
+    const date = new Date(eventTime);
+    const subject = buildSubject(date);
+    const htmlContent = buildEmailHTML(review.content, articles, date);
+    status.step = "send_email";
+    const sendResult = await sendEmail(env2, subject, htmlContent);
+    status.success = true;
+    status.emailId = sendResult.id;
+    status.provider = review.provider;
+    status.subject = subject;
+    await env2.CACHE.delete(KV_KEY_ARTICLES);
+    await env2.CACHE.delete(KV_KEY_REVIEW);
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+  await env2.CACHE.put(KV_KEY_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+__name(phaseDeliver, "phaseDeliver");
+async function getStatus(env2) {
+  const statusRaw = await env2.CACHE.get(KV_KEY_STATUS);
+  const errorsRaw = await env2.CACHE.get(KV_KEY_ERRORS);
+  return {
+    status: statusRaw ? JSON.parse(statusRaw) : null,
+    errors: errorsRaw ? JSON.parse(errorsRaw) : [],
+    kvNamespace: !!env2.CACHE
+  };
+}
+__name(getStatus, "getStatus");
+
+// src/index.js
+var index_default = {
+  // ============================================================
+  // CRON TRIGGER — Routage vers la bonne phase
+  // ============================================================
+  async scheduled(event, env2, ctx) {
+    const cron = event.cron;
+    const minute = parseInt(cron.split(" ")[0]);
+    let result;
+    if (minute === 0) {
+      console.log("[Phase 1] D\xE9marrage de la r\xE9cup\xE9ration RSS + extraction articles...");
+      result = await phaseFetch(env2, new Date(event.scheduledTime));
+      console.log("[Phase 1] Termin\xE9:", JSON.stringify(result));
+    } else if (minute === 2) {
+      console.log("[Phase 2] D\xE9marrage de l'analyse IA...");
+      result = await phaseAnalyze(env2, new Date(event.scheduledTime));
+      console.log("[Phase 2] Termin\xE9:", JSON.stringify(result));
+    } else if (minute === 4) {
+      console.log("[Phase 3] D\xE9marrage de l'envoi email...");
+      result = await phaseDeliver(env2, new Date(event.scheduledTime));
+      console.log("[Phase 3] Termin\xE9:", JSON.stringify(result));
+    } else {
+      console.log(`Cron inconnu: ${cron}`);
+      result = { error: "Cron trigger non reconnu", cron };
+    }
+    return result;
+  },
+  // ============================================================
+  // HTTP HANDLER — Endpoints de test et de monitoring
+  // ============================================================
+  async fetch(request, env2, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST",
+          "Access-Control-Allow-Headers": "Content-Type"
+        }
+      });
+    }
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Type": "application/json"
+    };
+    try {
+      if (path === "/" && request.method === "GET") {
+        const status = await getStatus(env2);
+        return new Response(JSON.stringify({
+          service: "Revue de Presse",
+          version: "1.0.0",
+          ...status
+        }), { headers: corsHeaders });
+      }
+      if (path === "/status" && request.method === "GET") {
+        const status = await getStatus(env2);
+        return new Response(JSON.stringify(status), { headers: corsHeaders });
+      }
+      if (path === "/trigger/fetch" && request.method === "POST") {
+        const result = await phaseFetch(env2, /* @__PURE__ */ new Date());
+        return new Response(JSON.stringify({
+          triggered: "phase_fetch",
+          ...result
+        }), { headers: corsHeaders });
+      }
+      if (path === "/trigger/analyze" && request.method === "POST") {
+        const result = await phaseAnalyze(env2, /* @__PURE__ */ new Date());
+        return new Response(JSON.stringify({
+          triggered: "phase_analyze",
+          ...result
+        }), { headers: corsHeaders });
+      }
+      if (path === "/trigger/deliver" && request.method === "POST") {
+        const result = await phaseDeliver(env2, /* @__PURE__ */ new Date());
+        return new Response(JSON.stringify({
+          triggered: "phase_deliver",
+          ...result
+        }), { headers: corsHeaders });
+      }
+      if (path === "/trigger/all" && request.method === "POST") {
+        const results = {};
+        results.phase1 = await phaseFetch(env2, /* @__PURE__ */ new Date());
+        if (!results.phase1.success) {
+          return new Response(JSON.stringify({
+            triggered: "all",
+            stoppedAt: "phase1",
+            ...results
+          }), { status: 500, headers: corsHeaders });
+        }
+        results.phase2 = await phaseAnalyze(env2, /* @__PURE__ */ new Date());
+        if (!results.phase2.success) {
+          return new Response(JSON.stringify({
+            triggered: "all",
+            stoppedAt: "phase2",
+            ...results
+          }), { status: 500, headers: corsHeaders });
+        }
+        results.phase3 = await phaseDeliver(env2, /* @__PURE__ */ new Date());
+        return new Response(JSON.stringify({
+          triggered: "all",
+          ...results
+        }), { headers: corsHeaders });
+      }
+      return new Response(JSON.stringify({
+        error: "Route non trouv\xE9e",
+        available_routes: {
+          "GET /": "Statut du service",
+          "GET /status": "Dernier statut du pipeline",
+          "POST /trigger/fetch": "D\xE9clencher Phase 1 (r\xE9cup\xE9ration)",
+          "POST /trigger/analyze": "D\xE9clencher Phase 2 (analyse IA)",
+          "POST /trigger/deliver": "D\xE9clencher Phase 3 (envoi email)",
+          "POST /trigger/all": "Pipeline complet (test)"
+        }
+      }), { status: 404, headers: corsHeaders });
+    } catch (err) {
+      return new Response(JSON.stringify({
+        error: err.message,
+        stack: err.stack
+      }), { status: 500, headers: corsHeaders });
+    }
+  }
+};
+export {
+  index_default as default
+};
+//# sourceMappingURL=index.js.map
+
+--e93e4aca57d289aa12e56395fcec0bf216f1cc5382e393466338c6155c5a--

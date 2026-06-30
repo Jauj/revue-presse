@@ -15,7 +15,7 @@ crons = ["0 6 * * 1-5", "2 6 * * 1-5", "4 6 * * 1-5"]
 # Remplacer l'ID ci-dessous par celui retourné
 [[kv_namespaces]]
 binding = "CACHE"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "ef1ef185628f45d9bc6f9d5c209b0efe"
 
 # === Variables d'environnement (non secrètes) ===
 [vars]
