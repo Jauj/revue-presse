@@ -28,7 +28,7 @@ MAX_ARTICLES = 15
 MAX_WORDS_PER_ARTICLE = 1500
 # Provider IA préféré : "workersai" | "groq" | "gemini" | "mistral"
 # "workersai" = Cloudflare natif (gratuit, dispo partout, 10K neurons/jour)
-AI_PROVIDER = "workersai"
+AI_PROVIDER = "mistral"
 
 # === Workers AI (fallback natif, optionnel) ===
 # Activé car provider principal
