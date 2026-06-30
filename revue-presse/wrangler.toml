@@ -19,7 +19,7 @@ id = "ef1ef185628f45d9bc6f9d5c209b0efe"
 
 # === Variables d'environnement (non secrètes) ===
 [vars]
-DESTINATION_EMAIL = "cusp-atop-multiply@duck.com"
+DESTINATION_EMAIL = "ferrierjonas@gmail.com"
 # Heure du fuseau pour l'affichage (Europe/Paris)
 TIMEZONE = "Europe/Paris"
 # Nombre max d'articles à traiter
