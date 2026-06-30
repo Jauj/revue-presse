@@ -36,20 +36,23 @@ export async function phaseFetch(env, eventTime) {
     const processedArticles = [];
 
     for (const article of feedResult.articles) {
-      // Si le RSS contient déjà le texte complet (>500 mots), l'utiliser
+      // Si le RSS contient déjà le texte complet (flux "full" ou blogs WordPress), l'utiliser
+      // hasFullContent = true → le flux RSS inclut le texte intégral
+      // Sinon, vérifier si le contenu est assez long (>100 mots)
       let extractedText = '';
 
-      if (article.fullContent && article.fullContent.split(/\s+/).length > 100) {
+      if (article.fullContent && article.fullContent.split(/\s+/).length > 80) {
         // Nettoyer le HTML du contenu RSS
         extractedText = article.fullContent
           .replace(/<[^>]*>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim()
           .substring(0, maxWords * 8);
+        article.extractionMethod = 'rss_full';
       }
 
-      // Sinon, fetcher l'article complet
-      if (!extractedText || extractedText.split(/\s+/).length < 100) {
+      // Sinon, fetcher l'article complet (uniquement si nécessaire — économise le CPU)
+      if (!extractedText || extractedText.split(/\s+/).length < 80) {
         const result = await fetchFullArticle(article.link, article.sourceName);
 
         if (result.success) {

@@ -2,7 +2,7 @@
 // fetcher.js — Récupération RSS + fetch articles avec anti-paywall
 // ============================================================
 
-import { SOURCES, ANTI_PAYWALL_HEADERS, ALT_HEADERS_FACEBOOK, JINA_FALLBACK_SITES } from './sources.js';
+import { SOURCES, ANTI_PAYWALL_HEADERS, ALT_HEADERS_FACEBOOK } from './sources.js';
 
 /**
  * Parse un flux RSS/Atom et retourne la liste des articles
@@ -39,6 +39,17 @@ export function parseRSS(xmlString) {
     const contentMatch = block.match(/<content(?:\s[^>]*)?>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
     if (contentMatch) item.fullContent = contentMatch[1].trim();
 
+    // Extraire contenu Atom (contenu dans <content type="html">)
+    const atomContent = block.match(/<content[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
+    if (atomContent && !item.fullContent) item.fullContent = atomContent[1].trim();
+
+    // Mastodon : le texte est dans <content type="html">
+    const mastodonContent = block.match(/<content[^>]*type="html"[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/content>/i);
+    if (mastodonContent) {
+      item.fullContent = mastodonContent[1].trim();
+      item.description = mastodonContent[1].replace(/<[^>]*>/g, ' ').trim().substring(0, 500);
+    }
+
     // Extraire date de publication
     const dateMatch = block.match(/<(?:pubDate|published|updated|dc:date)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:pubDate|published|updated|dc:date)>/i);
     if (dateMatch) item.pubDate = dateMatch[1].trim();
@@ -47,12 +58,42 @@ export function parseRSS(xmlString) {
     const authorMatch = block.match(/<(?:author|dc:creator)(?:[^>]*)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:author|dc:creator)>/i);
     if (authorMatch) item.author = authorMatch[1].trim().replace(/<[^>]*>/g, '');
 
-    if (item.title && item.link) {
+    // Si pas de titre, essayer de générer un titre depuis le contenu
+    if (!item.title && (item.fullContent || item.description)) {
+      const rawText = (item.fullContent || item.description).replace(/<[^>]*>/g, '').trim();
+      item.title = rawText.substring(0, 120).trim();
+    }
+
+    if (item.title && (item.link || item.fullContent)) {
       items.push(item);
     }
   }
 
   return items;
+}
+
+/**
+ * Parse un flux RSSHub bridge (Telegram, etc.)
+ * Les flux RSSHub ont un format Atom standard mais nécessitent
+ * un traitement spécifique pour les liens et le contenu
+ */
+function parseBridgeFeed(xmlString, source) {
+  const items = parseRSS(xmlString);
+
+  // Les flux Telegram ont parfois des liens vides ou vers t.me
+  // On conserve les items même sans lien si du contenu est disponible
+  return items.filter(item => {
+    // Garder si on a un titre ou du contenu
+    return (item.title && item.title.length > 10) ||
+           (item.description && item.description.length > 30) ||
+           (item.fullContent && item.fullContent.length > 30);
+  }).map(item => {
+    // Nettoyer les URLs Telegram si nécessaire
+    if (item.link && item.link.includes('t.me/')) {
+      item.link = item.link.replace(/\?utm_source.*$/, '');
+    }
+    return item;
+  });
 }
 
 /**
@@ -84,7 +125,14 @@ export async function fetchAllFeeds(maxArticles) {
           }
 
           const xml = await response.text();
-          const items = parseRSS(xml);
+          let items;
+
+          // Gestion des flux bridges (Telegram via RSSHub)
+          if (source.isBridge) {
+            items = parseBridgeFeed(xml, source);
+          } else {
+            items = parseRSS(xml);
+          }
 
           return items.map((item) => ({
             ...item,
@@ -93,6 +141,7 @@ export async function fetchAllFeeds(maxArticles) {
             sourceLang: source.lang,
             forceFullFetch: source.forceFullFetch || false,
             clearCookies: source.clearCookies || false,
+            hasFullContent: source.hasFullContent || false,
           }));
         } catch (err) {
           throw new Error(`${source.name}: ${err.message}`);
