@@ -11,6 +11,8 @@
  * @returns {Array} - Articles normalisés
  */
 export async function fetchAllNewsAPIs(env, { maxPerSource = 10, daysBack = 2 } = {}) {
+  // v3.2 : Réduit à 8 sources (4 EN retirées pour économiser les sous-requêtes)
+  // Guardian et NYT fournissent déjà du contenu EN
   const fetchers = [
     { name: 'CurrentsAPI', fn: () => fetchCurrents(env, { max: maxPerSource, lang: 'fr' }) },
     { name: 'GNews', fn: () => fetchGNews(env, { max: maxPerSource, lang: 'fr' }) },
@@ -20,10 +22,6 @@ export async function fetchAllNewsAPIs(env, { maxPerSource = 10, daysBack = 2 } 
     { name: 'NewsData', fn: () => fetchNewsData(env, { max: maxPerSource, lang: 'fr' }) },
     { name: 'NewsAPI', fn: () => fetchNewsAPI(env, { max: maxPerSource, lang: 'fr', daysBack, query: 'France économie politique' }) },
     { name: 'Noozra', fn: () => fetchNoozra(env, { max: maxPerSource }) },
-    { name: 'GNews-EN', fn: () => fetchGNews(env, { max: Math.ceil(maxPerSource / 2), lang: 'en' }) },
-    { name: 'NYT-World', fn: () => fetchNYT(env, { max: Math.ceil(maxPerSource / 2), section: 'world' }) },
-    { name: 'NewsAPI-EN', fn: () => fetchNewsAPI(env, { max: Math.ceil(maxPerSource / 2), lang: 'en', daysBack, query: 'Europe economy politics' }) },
-    { name: 'Noozra-World', fn: () => fetchNoozra(env, { max: Math.ceil(maxPerSource / 2), category: 'world' }) },
   ];
 
   // Lancer TOUT en parallèle (Promise.allSettled pour tolérance aux pannes)

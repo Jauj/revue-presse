@@ -4,10 +4,9 @@
 // FETCH parallélise RSS + 7 News APIs
 // ============================================================
 
-import { fetchAllFeeds, fetchFullArticle } from './fetcher.js';
+import { fetchAllFeeds } from './fetcher.js';
 import { fetchAllNewsAPIs } from './news-apis.js';
 import { filterAndSelect } from './filter.js';
-import { extractTextFromHTML, isPaywallPage } from './extractor.js';
 import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
 import { webSearchMultiLang } from './searcher.js';
 import { buildEmailHTML, buildEmailText, buildSubject, sendEmail } from './email.js';
@@ -103,7 +102,9 @@ export async function phaseFetch(env, eventTime) {
 }
 
 // ============================================================
-// PHASE 2 — FILTER : Dédup, scoring, extraction texte
+// PHASE 2 — FILTER : Dédup, scoring
+// NOTE : Plus d'extraction texte ici (trop de sous-requêtes).
+// On utilise le contenu RSS (fullContent ou description) tel quel.
 // ============================================================
 export async function phaseFilter(env, eventTime) {
   const status = { phase: 'filter', startedAt: eventTime.toISOString(), step: 'kv_read' };
@@ -115,53 +116,35 @@ export async function phaseFilter(env, eventTime) {
     const { articles: allRaw, meta } = JSON.parse(raw);
     status.rawCount = allRaw.length;
 
-    // Extraire le texte complet pour les articles RSS (pas les news APIs)
-    status.step = 'text_extraction';
+    // Préparer le texte extrait à partir du contenu RSS uniquement (0 sous-requête)
+    status.step = 'rss_content_prepare';
     const maxWords = parseInt(env.MAX_WORDS_PER_ARTICLE) || 1500;
     let extracted = 0;
 
-    // Filtrer les articles nécessitant une extraction (exclure news APIs)
-    const toExtract = allRaw.filter(a => a.fetchStrategy !== 'news_api');
+    for (const article of allRaw) {
+      let text = '';
 
-    // Extraction en batch de 5 concurrents (optimise le temps total)
-    const batchSize = 5;
-    for (let i = 0; i < toExtract.length; i += batchSize) {
-      const batch = toExtract.slice(i, i + batchSize);
-      const results = await Promise.allSettled(
-        batch.map(async (article) => {
-          let text = '';
-          if (article.fullContent && article.fullContent.split(/\s+/).length > 80) {
-            text = article.fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxWords * 8);
-            article.extractionMethod = 'rss_full';
-          }
+      // Utiliser le fullContent RSS si disponible et substantiel
+      if (article.fullContent && article.fullContent.split(/\s+/).length > 30) {
+        text = article.fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        article.extractionMethod = 'rss_full';
+      }
 
-          if (!text || text.split(/\s+/).length < 80) {
-            try {
-              const result = await fetchFullArticle(article.link, article.hasFullContent);
-              if (result.success) {
-                if (result.isMarkdown) {
-                  text = result.text;
-                } else if (result.html) {
-                  const extraction = extractTextFromHTML(result.html, maxWords);
-                  text = extraction.text;
-                  if (isPaywallPage(text)) article.extractionMethod = 'paywall';
-                }
-                article.extractionMethod = article.extractionMethod || result.method;
-              }
-            } catch (e) { /* skip */ }
-          }
+      // Sinon utiliser la description
+      if (!text && article.description) {
+        text = article.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        article.extractionMethod = 'rss_description';
+      }
 
-          if (text && text.split(/\s+/).length > 30) {
-            article.extractedText = text;
-            article.extractedWords = text.split(/\s+/).length;
-            return true;
-          }
-          return false;
-        })
-      );
-
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) extracted++;
+      // Tronquer si trop long
+      if (text) {
+        const words = text.split(/\s+/);
+        if (words.length > maxWords) {
+          text = words.slice(0, maxWords).join(' ');
+        }
+        article.extractedText = text;
+        article.extractedWords = text.split(/\s+/).length;
+        extracted++;
       }
     }
 
@@ -210,45 +193,10 @@ export async function phaseExtract(env, eventTime) {
     const { articles, meta } = JSON.parse(raw);
     if (!articles.length) throw new Error('0 article sélectionné.');
 
-    // === EXTRACTION PARALLÈLE par batch de catégorie ===
-    status.step = 'parallel_extract';
+    // === EXTRACTION : toujours un seul appel IA (économie de sous-requêtes) ===
+    status.step = 'ai_extract';
 
-    // Grouper par catégorie
-    const batches = {};
-    for (const a of articles) {
-      const cat = a.sourceCategory || 'autre';
-      if (!batches[cat]) batches[cat] = [];
-      batches[cat].push(a);
-    }
-
-    // Si un seul batch ou trop petit, tout extraire en un appel
-    const batchEntries = Object.entries(batches);
-    let extractionResult;
-
-    if (batchEntries.length <= 2 || articles.length <= 25) {
-      // Un seul appel IA
-      extractionResult = await stage1_extract(articles, env);
-    } else {
-      // Appels parallèles (max 3 concurrents)
-      const batchKeys = Object.keys(batches);
-      const mid = Math.ceil(batchKeys.length / 2);
-      const batchA = batchKeys.slice(0, mid).flatMap(k => batches[k]);
-      const batchB = batchKeys.slice(mid).flatMap(k => batches[k]);
-
-      const [resultA, resultB] = await Promise.all([
-        stage1_extract(batchA, env),
-        stage1_extract(batchB, env),
-      ]);
-
-      // Fusionner les extractions
-      extractionResult = {
-        content: `<!-- Batch A (${batchA.length} articles) -->\n${resultA.content}\n\n<!-- Batch B (${batchB.length} articles) -->\n${resultB.content}`,
-        provider: resultA.provider,
-        parallel: true,
-        batchA: { count: batchA.length, provider: resultA.provider },
-        batchB: { count: batchB.length, provider: resultB.provider },
-      };
-    }
+    const extractionResult = await stage1_extract(articles, env);
 
     await env.CACHE.put(KV_EXTRACTION, JSON.stringify({
       date: eventTime.toISOString(),
@@ -321,16 +269,15 @@ export async function phaseDraft(env, eventTime) {
     const themes = JSON.parse(themesRaw).content;
     const { articles } = JSON.parse(articlesRaw);
 
-    // === RECHERCHE WEB COMPLÉMENTAIRE (parallèle) ===
+    // === RECHERCHE WEB COMPLÉMENTAIRE (1 seule requête pour économiser les sous-requêtes) ===
     status.step = 'web_search';
     let webResearch = [];
     const searchQueries = generateSearchQueries(themes);
 
-    // Lancer les 3 requêtes de recherche en parallèle
-    const searchPromises = searchQueries.slice(0, 3).map(
-      query => webSearchMultiLang(query, ['fr', 'en'], 3, env)
-    );
-    const searchBatches = await Promise.allSettled(searchPromises);
+    // Lancer uniquement la 1ère requête de recherche
+    const searchBatches = await Promise.allSettled([
+      webSearchMultiLang(searchQueries[0], ['fr'], 3, env),
+    ]);
 
     const seenUrls = new Set();
     for (const batch of searchBatches) {
@@ -345,7 +292,7 @@ export async function phaseDraft(env, eventTime) {
       }
     }
 
-    status.research = { queries: searchQueries.slice(0, 3), found: webResearch.length, details: webResearch.map(r => ({ title: r.title?.substring(0, 60), source: r.source })) };
+    status.research = { queries: searchQueries.slice(0, 1), found: webResearch.length, details: webResearch.map(r => ({ title: r.title?.substring(0, 60), source: r.source })) };
     console.log(`[Phase Draft] Recherche web: ${webResearch.length} résultats complémentaires`);
 
     status.step = 'ai_draft';

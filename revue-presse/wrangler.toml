@@ -5,7 +5,9 @@ compatibility_flags = ["nodejs_compat"]
 
 # === CRON TRIGGER (pipeline complet séquentiel) ===
 # Un seul cron lance les 8 phases enchaînées.
-# Nécessite Workers Paid ($5/mois) pour le temps d'exécution (15 min).
+# ⚠️ IMPORTANT : Nécessite Workers Paid ($5/mois) pour :
+#   - Limite de 1000 sous-requêtes (free = 50)
+#   - Temps d'exécution CPU 30s (free = 10ms)
 # Sur le plan gratuit, utiliser POST /trigger/all manuellement.
 [triggers]
 crons = ["0 6 * * 1-5"]

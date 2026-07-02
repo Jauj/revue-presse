@@ -237,44 +237,29 @@ function buildArticlesXML(articles) {
 // Appels API — Cascade fallback Mistral → Gemini → Workers AI
 // ============================================================
 
-/** Appel IA format OpenAI (Mistral) — timeout 240s, retry 1x sur 429/5xx */
+/** Appel IA format OpenAI (Mistral) — timeout 120s, pas de retry (cascade fallback) */
 async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 16000,
-        top_p: 0.9,
-      }),
-      signal: AbortSignal.timeout(240000),
-    });
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 12000,
+      top_p: 0.9,
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
 
-    // Retry sur rate limit ou erreur serveur transitoire
-    if (!response.ok && response.status === 429 && attempt === 1) {
-      console.log(`[callOpenAI] 429 rate limit, retry dans 5s...`);
-      await new Promise(r => setTimeout(r, 5000));
-      continue;
-    }
-    if (!response.ok && response.status >= 500 && response.status < 600 && attempt === 1) {
-      console.log(`[callOpenAI] ${response.status} server error, retry dans 3s...`);
-      await new Promise(r => setTimeout(r, 3000));
-      continue;
-    }
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    return (await response.json()).choices[0].message.content;
-  }
-  throw new Error(`OpenAI: échec après 2 tentatives`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  return (await response.json()).choices[0].message.content;
 }
 
-/** Appel Gemini (API native) — timeout 240s */
+/** Appel Gemini (API native) — timeout 120s */
 async function callGemini(apiKey, systemPrompt, userPrompt) {
   const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
   const response = await fetch(url, {
@@ -285,9 +270,9 @@ async function callGemini(apiKey, systemPrompt, userPrompt) {
         role: 'user',
         parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
       }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 16000, topP: 0.9 },
+      generationConfig: { temperature: 0.2, maxOutputTokens: 12000, topP: 0.9 },
     }),
-    signal: AbortSignal.timeout(240000),
+    signal: AbortSignal.timeout(120000),
   });
   if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -417,48 +402,15 @@ export async function stage4_review(draft, articles, env) {
 
 /**
  * ÉTAPE 5 : Synthèse EIC (version finale)
- * 2 appels séquentiels espacés de 10 secondes
+ * 1 seul appel IA (économie de sous-requêtes)
  */
 export async function stage5_synthesis(draft, review, articles, env) {
   const xml = buildArticlesXML(articles);
 
-  // === Appel 1 : Synthèse intégrant la revue critique ===
   const prompt1 = `BROUILLON À AMÉLIORER :\n\n${draft}\n\n---\n\nRAPPORT DE REVUE CRITIQUE :\n\n${review}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
-  let synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true);
-  let synthesis = synthesisResult.content;
-  let provider = synthesisResult.provider;
+  const synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true);
 
-  // === Délai de 3 secondes entre les appels ===
-  await new Promise(r => setTimeout(r, 3000));
-
-  // === Appel 2 : Polissage final ===
-  const polishPrompt = `Voici une revue de presse qui vient d'être révisée. Relis-la une dernière fois et produis la VERSION FINALE DÉFINITIVE.
-Corrige toute erreur résiduelle, améliore la fluidité, vérifie que chaque fait est attribué.
-
-Revue révisée :
-${synthesis}
-
-Articles sources :
-${xml}
-
-Rappel du format attendu :
-📌 L'ESSENTIEL DU JOUR
-📰 ANALYSE THÉMATIQUE
-🔍 TENDANCES & PERSPECTIVES
-📊 CHIFFRES CLÉS
-🔮 À SURVEILLER
-
-IMPORTANT : C'est la version FINALE. Elle doit être parfaite.`;
-
-  try {
-    const polishResult = await callAI(env, STAGE5_PROMPT, polishPrompt, true);
-    synthesis = polishResult.content;
-    provider = polishResult.provider;
-  } catch (e) {
-    console.error(`Polissage échoué, conservation du 1er jet: ${e.message}`);
-  }
-
-  return { stage: 'synthesis', content: synthesis, provider };
+  return { stage: 'synthesis', content: synthesisResult.content, provider: synthesisResult.provider };
 }
 
 // ============================================================

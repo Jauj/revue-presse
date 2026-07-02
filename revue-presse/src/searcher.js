@@ -139,47 +139,41 @@ export async function searchDDGHTML(query, { numResults = 5, lang = 'fr' } = {})
 // SearXNG — Tertiary (instances publiques, JSON)
 // ============================================================
 export async function searchSearXNG(query, { numResults = 5, lang = 'fr' } = {}) {
-  const errors = [];
+  // v3.2 : Essayer seulement la 1ère instance (économie de sous-requêtes)
+  const instance = SEARXNG_INSTANCES[0];
 
-  for (const instance of SEARXNG_INSTANCES) {
-    try {
-      const params = new URLSearchParams({
-        q: query,
-        format: 'json',
-        language: lang === 'en' ? 'en' : 'fr',
-      });
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      format: 'json',
+      language: lang === 'en' ? 'en' : 'fr',
+    });
 
-      const resp = await fetch(`${instance}?${params}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-        },
-        signal: AbortSignal.timeout(10000),
-      });
+    const resp = await fetch(`${instance}?${params}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
 
-      if (!resp.ok) continue;
+    if (!resp.ok) return { results: [], source: 'searxng', error: `HTTP ${resp.status}` };
 
-      const data = await resp.json();
-      const results = (data.results || [])
-        .filter(r => r.url && !r.url.includes('removed.com'))
-        .slice(0, numResults)
-        .map(r => ({
-          title: r.title || '',
-          url: r.url.replace(/[?&]utm_[^&]*/gi, ''),
-          snippet: (r.content || '').substring(0, 300),
-          source: r.engine || 'SearXNG',
-        }));
+    const data = await resp.json();
+    const results = (data.results || [])
+      .filter(r => r.url && !r.url.includes('removed.com'))
+      .slice(0, numResults)
+      .map(r => ({
+        title: r.title || '',
+        url: r.url.replace(/[?&]utm_[^&]*/gi, ''),
+        snippet: (r.content || '').substring(0, 300),
+        source: r.engine || 'SearXNG',
+      }));
 
-      if (results.length > 0) {
-        return { results, source: `searxng (${instance.split('//')[1].split('/')[0]})` };
-      }
-    } catch (err) {
-      errors.push(`${instance}: ${err.message}`);
-      continue;
-    }
+    return { results, source: `searxng` };
+  } catch (err) {
+    return { results: [], source: 'searxng', error: err.message };
   }
-
-  return { results: [], source: 'searxng', error: errors.join('; ') };
 }
 
 // ============================================================
@@ -224,45 +218,35 @@ export async function searchBrave(query, { numResults = 5, lang = 'fr', env } = 
 }
 
 // ============================================================
-// Recherche unifiée — Cascade parallèle (premier gagnant)
-// NewsAPI, DDG, SearXNG démarrent en parallèle.
-// Dès qu'un retourne des résultats, on l'utilise.
-// Brave est lancé en dernier recours si les 3 échouent.
+// Recherche unifiée — Cascade séquentielle (économie de sous-requêtes)
+// v3.2 : Plus de parallélisme — chaque source est essayée séquentiellement
 // ============================================================
 export async function webSearch(query, { numResults = 5, lang = 'fr', env } = {}) {
-  const controller = new AbortController();
-
-  // Lance les 3 sources principales en parallèle
-  const promises = [
-    searchNewsAPI(query, { numResults, lang, daysBack: 2, env }),
-    searchDDGHTML(query, { numResults, lang }),
-    searchSearXNG(query, { numResults, lang }),
-  ];
-
-  // Attendre le premier qui retourne des résultats
-  for (const promise of promises) {
+  // 1. Essayer NewsAPI (si clé dispo)
+  if (env.NEWSAPI_KEY) {
     try {
-      const result = await Promise.race([
-        promise,
-        // Timeout global de 12s pour toute la cascade
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000)),
-      ]);
-      if (result.results.length > 0) {
-        controller.abort(); // Annuler les requêtes en cours
-        return result;
-      }
-    } catch (err) {
-      // Si timeout ou erreur, passer au suivant
-      if (err.message === 'timeout') break;
-      continue;
-    }
+      const result = await searchNewsAPI(query, { numResults, lang, daysBack: 2, env });
+      if (result.results.length > 0) return result;
+    } catch (e) { /* skip */ }
   }
 
-  // Dernier recours : Brave (si clé disponible)
+  // 2. Essayer DuckDuckGo
+  try {
+    const result = await searchDDGHTML(query, { numResults, lang });
+    if (result.results.length > 0) return result;
+  } catch (e) { /* skip */ }
+
+  // 3. Essayer SearXNG (1 seule instance)
+  try {
+    const result = await searchSearXNG(query, { numResults, lang });
+    if (result.results.length > 0) return result;
+  } catch (e) { /* skip */ }
+
+  // 4. Dernier recours : Brave
   try {
     const brave = await searchBrave(query, { numResults, lang, env });
     if (brave.results.length > 0) return brave;
-    return brave; // Retourne même si vide (contient l'erreur)
+    return brave;
   } catch (err) {
     return { results: [], source: 'none', error: `Toutes les sources ont échoué: ${err.message}` };
   }

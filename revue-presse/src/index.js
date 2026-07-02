@@ -9,7 +9,7 @@ import {
   phaseReview, phaseSynthesis, phaseDeliver, getStatus,
 } from './pipeline.js';
 
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 
 export default {
   async scheduled(event, env, ctx) {
