@@ -8,6 +8,7 @@
 import { fetchAllFeeds, fetchFullArticle } from './fetcher.js';
 import { extractTextFromHTML, isPaywallPage } from './extractor.js';
 import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
+import { webSearchMultiLang } from './searcher.js';
 import { buildEmailHTML, buildSubject, sendEmail } from './email.js';
 
 // Clés KV pour le bus inter-phases
@@ -131,6 +132,7 @@ export async function phaseExtract(env, eventTime) {
     status.success = true;
     status.provider = result.provider;
     status.outputLength = result.content.length;
+    status.stages = { extract: { started: eventTime.toISOString(), finished: new Date().toISOString(), provider: result.provider, length: result.content.length } };
 
   } catch (err) {
     status.success = false;
@@ -191,13 +193,38 @@ export async function phaseDraft(env, eventTime) {
     const themes = JSON.parse(themesRaw).content;
     const { articles } = JSON.parse(articlesRaw);
 
+    // === RECHERCHE WEB COMPLÉMENTAIRE ===
+    status.step = 'web_search';
+    let webResearch = [];
+    const searchQueries = generateSearchQueries(themes);
+    const allSearchResults = [];
+
+    for (const query of searchQueries.slice(0, 3)) {
+      const results = await webSearchMultiLang(query, ['fr', 'en'], 3, env);
+      allSearchResults.push(...results);
+    }
+
+    // Dédupliquer par URL
+    const seenUrls = new Set();
+    for (const r of allSearchResults) {
+      const clean = r.url?.split('?')[0];
+      if (!seenUrls.has(clean)) {
+        seenUrls.add(clean);
+        webResearch.push(r);
+      }
+    }
+
+    status.research = { queries: searchQueries.slice(0, 3), found: webResearch.length, details: webResearch.map(r => ({ title: r.title?.substring(0, 60), source: r.source })) };
+    console.log(`[Phase Draft] Recherche web: ${webResearch.length} résultats complémentaires`);
+
     status.step = 'ai_draft';
-    const result = await stage3_draft(themes, articles, env);
+    const result = await stage3_draft(themes, articles, env, webResearch);
 
     await env.CACHE.put(KV_DRAFT, JSON.stringify({
       date: eventTime.toISOString(),
       content: result.content,
       provider: result.provider,
+      research: status.research,
     }), { expirationTtl: 7200 });
 
     status.success = true;
@@ -355,4 +382,37 @@ export async function getStatus(env) {
     cotPhases: phaseStatuses,
     kvNamespace: !!env.CACHE,
   };
+}
+
+// ============================================================
+// Extraire des requêtes de recherche depuis les thèmes XML
+// ============================================================
+function generateSearchQueries(themesXML) {
+  const queries = [];
+
+  // Extraire les noms de thèmes du XML
+  const themeMatches = themesXML.matchAll(/<name>(.*?)<\/name>/g);
+  for (const match of themeMatches) {
+    const themeName = match[1].trim();
+    if (themeName && themeName.length > 2) {
+      queries.push(`${themeName} actualités`);
+    }
+  }
+
+  // Extraire les "missing_angles" si présents
+  const missingMatch = themesXML.match(/<missing_angles>([\s\S]*?)<\/missing_angles>/);
+  if (missingMatch) {
+    const angles = missingMatch[1].trim().split('\n').filter(l => l.trim().length > 5);
+    for (const angle of angles.slice(0, 2)) {
+      const clean = angle.replace(/<[^>]*>/g, '').trim();
+      if (clean.length > 3) queries.push(clean);
+    }
+  }
+
+  // Fallback si pas assez de thèmes
+  if (queries.length < 2) {
+    queries.push('actualités économie France', 'actualités politique internationale');
+  }
+
+  return queries.slice(0, 4);
 }

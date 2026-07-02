@@ -1,8 +1,6 @@
 // ============================================================
 // ai.js — Chain of Thought multi-étapes (Mixture-of-Agents)
-// Inspiré de badgiovi/news-editor-agent : Extraction → Thématisation
-// → Rédaction → Revue critique → Synthèse EIC
-// Providers : Gemini (gratuit, étapes 1-3) → Mistral (qualité, 4-5)
+// Providers : Mistral → Gemini → Workers AI (cascade fallback)
 // ============================================================
 
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
@@ -203,14 +201,14 @@ C'est cette version qui sera envoyée par email à des lecteurs exigeants.
 🔮 **À SURVEILLER** [...]`;
 
 // ============================================================
-// PROMPT UTILITAIRE : Construire les articles XML
+// PROMPT UTILITAIRE : Construire les articles XML — 500 mots
 // ============================================================
 function buildArticlesXML(articles) {
   let xml = `<articles count="${articles.length}">\n`;
   for (let i = 0; i < articles.length; i++) {
     const a = articles[i];
     const text = a.extractedText || a.description || '(indisponible)';
-    const excerpt = text.split(/\s+/).slice(0, 400).join(' ');
+    const excerpt = text.split(/\s+/).slice(0, 500).join(' ');
     xml += `<article id="${i + 1}">\n`;
     xml += `<source>${a.sourceName}</source>\n`;
     xml += `<lang>${a.sourceLang || 'fr'}</lang>\n`;
@@ -225,10 +223,10 @@ function buildArticlesXML(articles) {
 }
 
 // ============================================================
-// Appels API
+// Appels API — Cascade fallback Mistral → Gemini → Workers AI
 // ============================================================
 
-/** Appel IA format OpenAI (Mistral) */
+/** Appel IA format OpenAI (Mistral) — timeout 240s */
 async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -243,13 +241,13 @@ async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
       max_tokens: 8000,
       top_p: 0.9,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(240000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   return (await response.json()).choices[0].message.content;
 }
 
-/** Appel Gemini (API native) */
+/** Appel Gemini (API native) — timeout 240s */
 async function callGemini(apiKey, systemPrompt, userPrompt) {
   const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
   const response = await fetch(url, {
@@ -262,7 +260,7 @@ async function callGemini(apiKey, systemPrompt, userPrompt) {
       }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 8000, topP: 0.9 },
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(240000),
   });
   if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -282,47 +280,48 @@ async function callWorkersAI(env, prompt) {
   throw new Error('Workers AI: tous modèles échoués');
 }
 
-/** Choisir le meilleur provider disponible */
-function getBestProvider(env, preferHighQuality = false) {
-  // Haute qualité : Mistral > Gemini > Workers AI
-  // Standard : Gemini (gratuit) > Mistral > Workers AI
-  if (preferHighQuality) {
-    if (env.MISTRAL_API_KEY) return { type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY };
-    if (env.GEMINI_API_KEY) return { type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY };
-    return { type: 'workersai' };
-  } else {
-    if (env.GEMINI_API_KEY) return { type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY };
-    if (env.MISTRAL_API_KEY) return { type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY };
-    return { type: 'workersai' };
-  }
-}
+/**
+ * Appel IA avec cascade fallback complète
+ * Essaye chaque provider dans l'ordre, passe au suivant en cas d'erreur
+ */
+export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false) {
+  const providers = [];
 
-/** Appel IA unique avec fallback */
-async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false) {
-  const provider = getBestProvider(env, preferHighQuality);
-
-  try {
-    if (provider.type === 'mistral') {
-      return await callOpenAI(MISTRAL_ENDPOINT, provider.model, provider.key, systemPrompt, userPrompt);
-    } else if (provider.type === 'gemini') {
-      return await callGemini(provider.key, systemPrompt, userPrompt);
-    } else {
-      return await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
-    }
-  } catch (err) {
-    // Fallback vers le prochain provider
-    console.error(`Provider ${provider.type} échoué: ${err.message}, tentative fallback...`);
-    if (provider.type === 'gemini' && env.MISTRAL_API_KEY) {
-      return await callOpenAI(MISTRAL_ENDPOINT, 'mistral-large-latest', env.MISTRAL_API_KEY, systemPrompt, userPrompt);
-    }
-    if (provider.type === 'mistral' && env.GEMINI_API_KEY) {
-      return await callGemini(env.GEMINI_API_KEY, systemPrompt, userPrompt);
-    }
-    if (provider.type !== 'workersai') {
-      return await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
-    }
-    throw err;
+  // Construire la liste ordonnée de providers
+  if (env.MISTRAL_API_KEY) {
+    providers.push({ type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY });
   }
+  if (env.GEMINI_API_KEY) {
+    providers.push({ type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY });
+  }
+  providers.push({ type: 'workersai' });
+
+  // Si haute qualité, mettre Mistral en premier (déjà le cas)
+  // Si standard, on garde Mistral en premier aussi (plus fiable que Gemini pour le CoT)
+
+  const errors = [];
+
+  for (const provider of providers) {
+    try {
+      let result;
+      if (provider.type === 'mistral') {
+        result = await callOpenAI(MISTRAL_ENDPOINT, provider.model, provider.key, systemPrompt, userPrompt);
+      } else if (provider.type === 'gemini') {
+        result = await callGemini(provider.key, systemPrompt, userPrompt);
+      } else {
+        result = await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
+      }
+      console.log(`[callAI] Succès avec ${provider.type}${provider.model ? '/' + provider.model : ''} (${result.length} chars)`);
+      return { content: result, provider: provider.type };
+    } catch (err) {
+      const errMsg = `${provider.type}: ${err.message}`;
+      errors.push(errMsg);
+      console.error(`[callAI] Échec ${provider.type}: ${err.message}`);
+      continue;
+    }
+  }
+
+  throw new Error(`Tous les providers IA ont échoué: ${errors.join(' | ')}`);
 }
 
 // ============================================================
@@ -331,13 +330,12 @@ async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false) 
 
 /**
  * ÉTAPE 1 : Extraction des faits structurés
- * Gemini (gratuit) suffit pour cette tâche de structuration
  */
 export async function stage1_extract(articles, env) {
   const xml = buildArticlesXML(articles);
   const userPrompt = `Extrais les faits clés de ces ${articles.length} articles :\n\n${xml}`;
-  const result = await callAI(env, STAGE1_PROMPT, userPrompt, false);
-  return { stage: 'extraction', content: result, provider: getBestProvider(env).type };
+  const result = await callAI(env, STAGE1_PROMPT, userPrompt, true);
+  return { stage: 'extraction', content: result.content, provider: result.provider };
 }
 
 /**
@@ -346,18 +344,31 @@ export async function stage1_extract(articles, env) {
 export async function stage2_theme(extraction, articles, env) {
   const xml = buildArticlesXML(articles);
   const userPrompt = `Voici les fiches structurées extraites de ${articles.length} articles :\n\n${extraction}\n\n---\n\nArticles originaux pour référence :\n${xml}`;
-  const result = await callAI(env, STAGE2_PROMPT, userPrompt, false);
-  return { stage: 'theming', content: result, provider: getBestProvider(env).type };
+  const result = await callAI(env, STAGE2_PROMPT, userPrompt, true);
+  return { stage: 'theming', content: result.content, provider: result.provider };
 }
 
 /**
  * ÉTAPE 3 : Rédaction du brouillon Smart Brevity
+ * (optionnellement enrichi par recherche web)
  */
-export async function stage3_draft(themes, articles, env) {
+export async function stage3_draft(themes, articles, env, webResearch = null) {
   const xml = buildArticlesXML(articles);
-  const userPrompt = `Voici le regroupement thématique :\n\n${themes}\n\n---\n\nArticles originaux :\n${xml}`;
-  const result = await callAI(env, STAGE3_PROMPT, userPrompt, true); // haute qualité pour la rédaction
-  return { stage: 'drafting', content: result, provider: getBestProvider(env, true).type };
+
+  let userPrompt = `Voici le regroupement thématique :\n\n${themes}\n\n---\n\nArticles originaux :\n${xml}`;
+
+  // Ajouter les résultats de recherche web si disponibles
+  if (webResearch && webResearch.length > 0) {
+    userPrompt += `\n\n---\n\nRECHERCHE WEB COMPLÉMENTAIRE :\nLes articles ci-dessus proviennent principalement de sources francophones. `;
+    userPrompt += `Voici des informations supplémentaires trouvées sur le web pour enrichir la revue :\n\n`;
+    for (const item of webResearch) {
+      userPrompt += `[${item.source || 'Web'}] ${item.title}\n`;
+      userPrompt += `${(item.snippet || item.content || '').substring(0, 300)}\n\n`;
+    }
+  }
+
+  const result = await callAI(env, STAGE3_PROMPT, userPrompt, true);
+  return { stage: 'drafting', content: result.content, provider: result.provider };
 }
 
 /**
@@ -367,25 +378,24 @@ export async function stage4_review(draft, articles, env) {
   const xml = buildArticlesXML(articles);
   const userPrompt = `REVUE À ÉVALUER :\n\n${draft}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
   const result = await callAI(env, STAGE4_PROMPT, userPrompt, true);
-  return { stage: 'review', content: result, provider: getBestProvider(env, true).type };
+  return { stage: 'review', content: result.content, provider: result.provider };
 }
 
 /**
  * ÉTAPE 5 : Synthèse EIC (version finale)
- * 2 appels séquentiels espacés de 10 secondes :
- *   - 1er appel : synthèse intégrant la revue
- *   - 2e appel : polissage final
+ * 2 appels séquentiels espacés de 10 secondes
  */
 export async function stage5_synthesis(draft, review, articles, env) {
   const xml = buildArticlesXML(articles);
 
   // === Appel 1 : Synthèse intégrant la revue critique ===
   const prompt1 = `BROUILLON À AMÉLIORER :\n\n${draft}\n\n---\n\nRAPPORT DE REVUE CRITIQUE :\n\n${review}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
-  let synthesis = await callAI(env, STAGE5_PROMPT, prompt1, true);
-  let provider = getBestProvider(env, true).type;
+  let synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true);
+  let synthesis = synthesisResult.content;
+  let provider = synthesisResult.provider;
 
-  // === Délai de 10 secondes entre les appels (Chain of Thought espacé) ===
-  await new Promise(r => setTimeout(r, 10000));
+  // === Délai de 3 secondes entre les appels ===
+  await new Promise(r => setTimeout(r, 3000));
 
   // === Appel 2 : Polissage final ===
   const polishPrompt = `Voici une revue de presse qui vient d'être révisée. Relis-la une dernière fois et produis la VERSION FINALE DÉFINITIVE.
@@ -407,10 +417,10 @@ Rappel du format attendu :
 IMPORTANT : C'est la version FINALE. Elle doit être parfaite.`;
 
   try {
-    synthesis = await callAI(env, STAGE5_PROMPT, polishPrompt, true);
-    provider = getBestProvider(env, true).type;
+    const polishResult = await callAI(env, STAGE5_PROMPT, polishPrompt, true);
+    synthesis = polishResult.content;
+    provider = polishResult.provider;
   } catch (e) {
-    // Si le 2e appel échoue, garder le résultat du 1er
     console.error(`Polissage échoué, conservation du 1er jet: ${e.message}`);
   }
 
@@ -450,13 +460,13 @@ function generateRuleBasedReview(articles) {
 }
 
 /**
- * Fonction legacy pour compatibilité (appelée si jamais le CoT n'est pas utilisé)
+ * Fonction legacy pour compatibilité
  */
 export async function generatePressReview(articles, env) {
   const userPrompt = `Produis la revue de presse à partir des ${articles.length} articles ci-dessous. Traite-les tous.\n\n${buildArticlesXML(articles)}`;
   try {
-    const content = await callAI(env, STAGE3_PROMPT, userPrompt, true);
-    return { content, provider: getBestProvider(env, true).type, model: 'cot-single', success: true };
+    const result = await callAI(env, STAGE3_PROMPT, userPrompt, true);
+    return { content: result.content, provider: result.provider, model: 'cot-single', success: true };
   } catch (err) {
     return {
       content: generateRuleBasedReview(articles),
