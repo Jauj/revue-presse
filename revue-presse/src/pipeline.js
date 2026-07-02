@@ -10,7 +10,7 @@ import { filterAndSelect } from './filter.js';
 import { extractTextFromHTML, isPaywallPage } from './extractor.js';
 import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
 import { webSearchMultiLang } from './searcher.js';
-import { buildEmailHTML, buildSubject, sendEmail } from './email.js';
+import { buildEmailHTML, buildEmailText, buildSubject, sendEmail } from './email.js';
 
 // Clés KV pour le bus inter-phases
 const KV_RAW_ARTICLES = 'pipeline:raw_articles';      // après FETCH (brut, non dédupliqué)
@@ -120,36 +120,48 @@ export async function phaseFilter(env, eventTime) {
     const maxWords = parseInt(env.MAX_WORDS_PER_ARTICLE) || 1500;
     let extracted = 0;
 
-    for (const article of allRaw) {
-      // Les articles des news APIs n'ont qu'un titre + description (pas de link utile)
-      if (article.fetchStrategy === 'news_api') continue;
+    // Filtrer les articles nécessitant une extraction (exclure news APIs)
+    const toExtract = allRaw.filter(a => a.fetchStrategy !== 'news_api');
 
-      let text = '';
-      if (article.fullContent && article.fullContent.split(/\s+/).length > 80) {
-        text = article.fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxWords * 8);
-        article.extractionMethod = 'rss_full';
-      }
-
-      if (!text || text.split(/\s+/).length < 80) {
-        try {
-          const result = await fetchFullArticle(article.link, article.hasFullContent);
-          if (result.success) {
-            if (result.isMarkdown) {
-              text = result.text;
-            } else if (result.html) {
-              const extraction = extractTextFromHTML(result.html, maxWords);
-              text = extraction.text;
-              if (isPaywallPage(text)) article.extractionMethod = 'paywall';
-            }
-            article.extractionMethod = article.extractionMethod || result.method;
+    // Extraction en batch de 5 concurrents (optimise le temps total)
+    const batchSize = 5;
+    for (let i = 0; i < toExtract.length; i += batchSize) {
+      const batch = toExtract.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(async (article) => {
+          let text = '';
+          if (article.fullContent && article.fullContent.split(/\s+/).length > 80) {
+            text = article.fullContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxWords * 8);
+            article.extractionMethod = 'rss_full';
           }
-        } catch (e) { /* skip */ }
-      }
 
-      if (text && text.split(/\s+/).length > 30) {
-        article.extractedText = text;
-        article.extractedWords = text.split(/\s+/).length;
-        extracted++;
+          if (!text || text.split(/\s+/).length < 80) {
+            try {
+              const result = await fetchFullArticle(article.link, article.hasFullContent);
+              if (result.success) {
+                if (result.isMarkdown) {
+                  text = result.text;
+                } else if (result.html) {
+                  const extraction = extractTextFromHTML(result.html, maxWords);
+                  text = extraction.text;
+                  if (isPaywallPage(text)) article.extractionMethod = 'paywall';
+                }
+                article.extractionMethod = article.extractionMethod || result.method;
+              }
+            } catch (e) { /* skip */ }
+          }
+
+          if (text && text.split(/\s+/).length > 30) {
+            article.extractedText = text;
+            article.extractedWords = text.split(/\s+/).length;
+            return true;
+          }
+          return false;
+        })
+      );
+
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) extracted++;
       }
     }
 
@@ -309,23 +321,27 @@ export async function phaseDraft(env, eventTime) {
     const themes = JSON.parse(themesRaw).content;
     const { articles } = JSON.parse(articlesRaw);
 
-    // === RECHERCHE WEB COMPLÉMENTAIRE ===
+    // === RECHERCHE WEB COMPLÉMENTAIRE (parallèle) ===
     status.step = 'web_search';
     let webResearch = [];
     const searchQueries = generateSearchQueries(themes);
-    const allSearchResults = [];
 
-    for (const query of searchQueries.slice(0, 3)) {
-      const results = await webSearchMultiLang(query, ['fr', 'en'], 3, env);
-      allSearchResults.push(...results);
-    }
+    // Lancer les 3 requêtes de recherche en parallèle
+    const searchPromises = searchQueries.slice(0, 3).map(
+      query => webSearchMultiLang(query, ['fr', 'en'], 3, env)
+    );
+    const searchBatches = await Promise.allSettled(searchPromises);
 
     const seenUrls = new Set();
-    for (const r of allSearchResults) {
-      const clean = r.url?.split('?')[0];
-      if (!seenUrls.has(clean)) {
-        seenUrls.add(clean);
-        webResearch.push(r);
+    for (const batch of searchBatches) {
+      if (batch.status === 'fulfilled') {
+        for (const r of batch.value) {
+          const clean = r.url?.split('?')[0].split('#')[0];
+          if (clean && !seenUrls.has(clean)) {
+            seenUrls.add(clean);
+            webResearch.push(r);
+          }
+        }
       }
     }
 
@@ -403,15 +419,12 @@ export async function phaseSynthesis(env, eventTime) {
     const articlesRaw = await env.CACHE.get(KV_ARTICLES);
     if (!draftRaw || !reviewRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
 
-    const draft = JSON.parse(draftRaw).content;
-    const review = JSON.parse(reviewRaw).content;
-    const { articles } = JSON.parse(articlesRaw);
+    const { content: draft } = JSON.parse(draftRaw);
+    const { content: review } = JSON.parse(reviewRaw);
+    const { articles, meta } = JSON.parse(articlesRaw);
 
     status.step = 'ai_synthesis';
     const result = await stage5_synthesis(draft, review, articles, env);
-
-    const articlesRaw2 = await env.CACHE.get(KV_ARTICLES);
-    const meta = articlesRaw2 ? JSON.parse(articlesRaw2).meta : {};
 
     await env.CACHE.put(KV_REVIEW_FINAL, JSON.stringify({
       date: eventTime.toISOString(),
@@ -450,11 +463,12 @@ export async function phaseDeliver(env, eventTime) {
 
     status.step = 'build_email';
     const date = new Date(eventTime);
-    const subject = buildSubject(date);
-    const htmlContent = buildEmailHTML(review.content, articles, date);
+    const subject = buildSubject(date, review.content);
+    const htmlContent = buildEmailHTML(review.content, articles, date, review.provider);
+    const textContent = buildEmailText(review.content, articles, date);
 
     status.step = 'send_email';
-    const sendResult = await sendEmail(env, subject, htmlContent);
+    const sendResult = await sendEmail(env, subject, htmlContent, textContent);
 
     status.success = true;
     status.emailId = sendResult.id;

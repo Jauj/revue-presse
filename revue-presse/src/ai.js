@@ -32,7 +32,7 @@ const BASE_SYSTEM = `Tu es un rédacteur en chef avec 20 ans d'expérience en re
 // ============================================================
 const STAGE1_PROMPT = `${BASE_SYSTEM}
 
-## TAQUE MISSION — ÉTAPE 1 (EXTRACTION)
+## TAACHE MISSION — ÉTAPE 1 (EXTRACTION)
 Tu es le **Rédacteur Extracteur**. Tu reçois un ensemble d'articles bruts. Pour CHAQUE article, tu extrais :
 1. L'événement clé (1 phrase, voix active)
 2. Les données chiffrées mentionnées
@@ -58,7 +58,7 @@ IMPORTANT : Traite TOUS les articles. Ne rien inventer hors des articles fournis
 // ============================================================
 const STAGE2_PROMPT = `${BASE_SYSTEM}
 
-## TAQUE MISSION — ÉTAPE 2 (THÉMATISATION)
+## TAACHE MISSION — ÉTAPE 2 (THÉMATISATION)
 Tu es le **Rédacteur Thématicien**. Tu reçois des fiches structurées d'articles (résultat de l'étape 1).
 Tu dois :
 1. Regrouper les articles par **thème principal** (max 6 thèmes)
@@ -93,7 +93,7 @@ Tu dois :
 // ============================================================
 const STAGE3_PROMPT = `${BASE_SYSTEM}
 
-## TAQUE MISSION — ÉTAPE 3 (RÉDACTION)
+## TAACHE MISSION — ÉTAPE 3 (RÉDACTION)
 Tu es le **Rédacteur de Contenu**. Tu reçois le regroupement thématique (étape 2) ET les articles originaux.
 Tu rédiges la revue de presse COMPLÈTE en suivant ce format PRECIS :
 
@@ -175,7 +175,7 @@ Tu dois l'évaluer avec la plus grande rigueur et produire un rapport de correct
 // ============================================================
 const STAGE5_PROMPT = `${BASE_SYSTEM}
 
-## TAQUE MISSION — ÉTAPE 5 (SYNTHÈSE EDITOR-IN-CHIEF)
+## TAACHE MISSION — ÉTAPE 5 (SYNTHÈSE EDITOR-IN-CHIEF)
 Tu es l'**Éditeur en Chef**. Tu as entre les mains :
 - Un brouillon de revue de presse
 - Un rapport de relecture critique
@@ -203,6 +203,17 @@ C'est cette version qui sera envoyée par email à des lecteurs exigeants.
 // ============================================================
 // PROMPT UTILITAIRE : Construire les articles XML — 500 mots
 // ============================================================
+
+/** Échappe les caractères XML dangereux pour éviter de casser le parsing */
+function escapeXML(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 function buildArticlesXML(articles) {
   let xml = `<articles count="${articles.length}">\n`;
   for (let i = 0; i < articles.length; i++) {
@@ -210,12 +221,12 @@ function buildArticlesXML(articles) {
     const text = a.extractedText || a.description || '(indisponible)';
     const excerpt = text.split(/\s+/).slice(0, 500).join(' ');
     xml += `<article id="${i + 1}">\n`;
-    xml += `<source>${a.sourceName}</source>\n`;
-    xml += `<lang>${a.sourceLang || 'fr'}</lang>\n`;
-    xml += `<category>${a.sourceCategory || 'autre'}</category>\n`;
-    xml += `<title>${a.title}</title>\n`;
-    xml += `<content>\n${excerpt}\n</content>\n`;
-    if (a.link) xml += `<url>${a.link}</url>\n`;
+    xml += `<source>${escapeXML(a.sourceName)}</source>\n`;
+    xml += `<lang>${escapeXML(a.sourceLang || 'fr')}</lang>\n`;
+    xml += `<category>${escapeXML(a.sourceCategory || 'autre')}</category>\n`;
+    xml += `<title>${escapeXML(a.title)}</title>\n`;
+    xml += `<content>\n${escapeXML(excerpt)}\n</content>\n`;
+    if (a.link) xml += `<url>${escapeXML(a.link)}</url>\n`;
     xml += `</article>\n\n`;
   }
   xml += `</articles>`;
@@ -226,25 +237,41 @@ function buildArticlesXML(articles) {
 // Appels API — Cascade fallback Mistral → Gemini → Workers AI
 // ============================================================
 
-/** Appel IA format OpenAI (Mistral) — timeout 240s */
+/** Appel IA format OpenAI (Mistral) — timeout 240s, retry 1x sur 429/5xx */
 async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 8000,
-      top_p: 0.9,
-    }),
-    signal: AbortSignal.timeout(240000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-  return (await response.json()).choices[0].message.content;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 16000,
+        top_p: 0.9,
+      }),
+      signal: AbortSignal.timeout(240000),
+    });
+
+    // Retry sur rate limit ou erreur serveur transitoire
+    if (!response.ok && response.status === 429 && attempt === 1) {
+      console.log(`[callOpenAI] 429 rate limit, retry dans 5s...`);
+      await new Promise(r => setTimeout(r, 5000));
+      continue;
+    }
+    if (!response.ok && response.status >= 500 && response.status < 600 && attempt === 1) {
+      console.log(`[callOpenAI] ${response.status} server error, retry dans 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+      continue;
+    }
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    return (await response.json()).choices[0].message.content;
+  }
+  throw new Error(`OpenAI: échec après 2 tentatives`);
 }
 
 /** Appel Gemini (API native) — timeout 240s */
@@ -258,7 +285,7 @@ async function callGemini(apiKey, systemPrompt, userPrompt) {
         role: 'user',
         parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
       }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 8000, topP: 0.9 },
+      generationConfig: { temperature: 0.2, maxOutputTokens: 16000, topP: 0.9 },
     }),
     signal: AbortSignal.timeout(240000),
   });
@@ -273,8 +300,9 @@ async function callWorkersAI(env, prompt) {
   const models = ['@cf/meta/llama-3.3-70b-instruct', '@cf/meta/llama-3.1-8b-instruct'];
   for (const model of models) {
     try {
-      const r = await env.AI.run(model, { prompt, max_tokens: 6000, temperature: 0.2 });
-      if (r.response && r.response.length > 100) return r.response;
+      const r = await env.AI.run(model, { prompt, max_tokens: 8000, temperature: 0.2 });
+      const text = r.response || '';
+      if (text.length > 100) return text;
     } catch (e) { /* skip */ }
   }
   throw new Error('Workers AI: tous modèles échoués');
@@ -283,11 +311,11 @@ async function callWorkersAI(env, prompt) {
 /**
  * Appel IA avec cascade fallback complète
  * Essaye chaque provider dans l'ordre, passe au suivant en cas d'erreur
+ * Les erreurs de contenu vide (pas de texte retourné) déclenchent aussi le fallback
  */
 export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false) {
   const providers = [];
 
-  // Construire la liste ordonnée de providers
   if (env.MISTRAL_API_KEY) {
     providers.push({ type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY });
   }
@@ -295,9 +323,6 @@ export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = 
     providers.push({ type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY });
   }
   providers.push({ type: 'workersai' });
-
-  // Si haute qualité, mettre Mistral en premier (déjà le cas)
-  // Si standard, on garde Mistral en premier aussi (plus fiable que Gemini pour le CoT)
 
   const errors = [];
 
@@ -311,6 +336,15 @@ export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = 
       } else {
         result = await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
       }
+
+      // Vérifier que le contenu est substantiel
+      if (!result || result.trim().length < 50) {
+        const errMsg = `${provider.type}: réponse vide ou trop courte (${(result || '').length} chars)`;
+        errors.push(errMsg);
+        console.warn(`[callAI] ${errMsg}`);
+        continue;
+      }
+
       console.log(`[callAI] Succès avec ${provider.type}${provider.model ? '/' + provider.model : ''} (${result.length} chars)`);
       return { content: result, provider: provider.type };
     } catch (err) {

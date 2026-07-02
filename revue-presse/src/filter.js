@@ -28,16 +28,37 @@ export function filterAndSelect(articles, { maxArticles = 50, minWords = 20, max
   // 4. Trier par score décroissant
   scored.sort((a, b) => b._score - a._score);
 
-  // 5. Limiter par source (pas plus de maxPerSource par source)
+  // 5. Sélection avec diversité des sources
+  //    Round-robin pondéré : on remplit en garantissant qu'aucune source
+  //    ne domine trop, tout en respectant le score
   const selected = [];
   const sourceCounts = {};
 
+  // Premier passage : prendre le meilleur de chaque source (diversité max)
+  const bestPerSource = new Map();
   for (const article of scored) {
     const src = article.sourceName;
-    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
-    if (sourceCounts[src] > maxPerSource) continue;
-    selected.push(article);
+    if (!bestPerSource.has(src)) {
+      bestPerSource.has(src); // just checking
+      bestPerSource.set(src, article);
+    }
+  }
+  // Ajouter les meilleurs de chaque source (triés par score)
+  const diversityOrder = [...bestPerSource.values()].sort((a, b) => b._score - a._score);
+  for (const article of diversityOrder) {
     if (selected.length >= maxArticles) break;
+    selected.push(article);
+    sourceCounts[article.sourceName] = 1;
+  }
+
+  // Deuxième passage : remplir les places restantes par score, avec maxPerSource
+  for (const article of scored) {
+    if (selected.length >= maxArticles) break;
+    const src = article.sourceName;
+    if ((sourceCounts[src] || 0) >= maxPerSource) continue;
+    if (selected.includes(article)) continue; // déjà pris dans le 1er passage
+    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+    selected.push(article);
   }
 
   // Stats
@@ -121,40 +142,53 @@ function titleSimilarity(a, b) {
 function scoreArticle(article) {
   let score = 50; // base
 
-  // Bonus contenu complet
+  // === Contenu textuel ===
   const text = article.extractedText || article.description || article.fullContent || '';
   const wordCount = text.split(/\s+/).length;
-  if (wordCount > 300) score += 20;
+  if (wordCount > 500) score += 25;      // Article complet = très valorisé
+  else if (wordCount > 300) score += 20;
   else if (wordCount > 100) score += 10;
   else if (wordCount > 50) score += 5;
 
-  // Bonus source RSS (contenu plus fiable que les APIs)
+  // === Source / stratégie de fetch ===
   if (article.fetchStrategy === 'direct' || article.fetchStrategy === 'telegram_embed') {
-    score += 15;
+    score += 15;  // RSS direct = fiable, contenu riche
   }
-  // Bonus source jina (contenu full)
   if (article.fetchStrategy === 'jina_html') score += 10;
-  // Légèrement moins pour les news APIs (juste des titres/snippets)
-  if (article.fetchStrategy === 'news_api') score -= 5;
+  if (article.fetchStrategy === 'news_api') {
+    // Les news APIs n'ont souvent qu'un snippet — pénalité modérée
+    score -= 5;
+    // Mais bonus si la description est longue (signe d'un bon résumé)
+    if (wordCount > 50) score += 5;
+  }
 
-  // Bonus source premium
-  const premiumSources = ['Le Monde', 'Les Échos', 'Mediapart', 'NYT', 'Guardian'];
+  // === Bonus source premium ===
+  const premiumSources = ['Le Monde', 'Les Échos', 'Mediapart', 'NYT', 'Guardian', 'CEPII'];
   if (premiumSources.some(s => article.sourceName.includes(s))) score += 10;
 
-  // Bonus récence (articles d'aujourd'hui)
+  // === Bonus diversité linguistique ===
+  if (article.sourceLang === 'en') score += 5; // Sources anglophones = valeur ajoutée
+
+  // === Récence ===
   if (article.pubDate) {
     const age = Date.now() - new Date(article.pubDate).getTime();
-    if (age < 86400000) score += 10;      // < 24h
+    if (age < 43200000) score += 15;       // < 12h = très frais
+    else if (age < 86400000) score += 10;  // < 24h
     else if (age < 172800000) score += 5;  // < 48h
+    else score -= 10;                       // > 48h = potentiellement périmé
   }
 
-  // Bonus diversité catégorie
+  // === Diversité catégorie ===
   const diverseCategories = ['economie', 'international', 'presse_nationale'];
   if (diverseCategories.includes(article.sourceCategory)) score += 5;
 
-  // Pénalité titres trop génériques
-  const genericWords = ['newsletter', 'podcast', 'abonnez', 'inscription'];
+  // === Pénalités ===
+  // Titres trop génériques (pas des vrais articles)
+  const genericWords = ['newsletter', 'podcast', 'abonnez', 'inscription', 's\'abonner'];
   if (genericWords.some(w => article.title.toLowerCase().includes(w))) score -= 30;
+
+  // Titres tout en majuscules (souvent des alertes/breaking news non substantielles)
+  if (article.title === article.title.toUpperCase() && article.title.length > 20) score -= 5;
 
   return Math.max(0, Math.min(100, score));
 }

@@ -3,7 +3,7 @@
 // Stratégies : direct | jina_html | telegram_embed
 // ============================================================
 
-import { SOURCES, ANTI_PAYWALL_HEADERS } from './sources.js';
+import { SOURCES, ANTI_PAYWALL_HEADERS, ALT_HEADERS_FACEBOOK } from './sources.js';
 
 // ============================================================
 // Parseurs RSS/Atom
@@ -306,10 +306,10 @@ export async function fetchAllFeeds(maxArticles) {
 
 /**
  * Fetch un article complet avec stratégie anti-paywall
- * 3 niveaux : Googlebot → Facebookbot → r.jina.ai
+ * 4 niveaux : RSS full → r.jina.ai → Googlebot → Facebookbot
  */
 export async function fetchFullArticle(url, hasFullContent = false) {
-  // === Si la source RSS a déjà du contenu complet, essayer Googlebot ===
+  // === Si la source RSS a du contenu complet, essayer Googlebot d'abord ===
   if (hasFullContent) {
     try {
       const resp = await fetch(url, {
@@ -325,7 +325,7 @@ export async function fetchFullArticle(url, hasFullContent = false) {
     } catch (e) { /* skip */ }
   }
 
-  // === Stratégie principale : r.jina.ai ===
+  // === Stratégie principale : r.jina.ai (retourne du markdown propre) ===
   try {
     const resp = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
       headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text' },
@@ -339,7 +339,7 @@ export async function fetchFullArticle(url, hasFullContent = false) {
     }
   } catch (e) { /* skip */ }
 
-  // === Dernier recours : Googlebot direct ===
+  // === Googlebot direct ===
   try {
     const resp = await fetch(url, {
       headers: { ...ANTI_PAYWALL_HEADERS },
@@ -349,6 +349,20 @@ export async function fetchFullArticle(url, hasFullContent = false) {
       const html = await resp.text();
       if (html.length > 500) {
         return { html, method: 'googlebot', isMarkdown: false, success: true };
+      }
+    }
+  } catch (e) { /* skip */ }
+
+  // === Facebookbot (dernier recours pour certains paywalls) ===
+  try {
+    const resp = await fetch(url, {
+      headers: { ...ALT_HEADERS_FACEBOOK },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (resp.ok) {
+      const html = await resp.text();
+      if (html.length > 500) {
+        return { html, method: 'facebookbot', isMarkdown: false, success: true };
       }
     }
   } catch (e) { /* skip */ }

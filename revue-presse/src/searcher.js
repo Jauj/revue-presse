@@ -1,7 +1,10 @@
 // ============================================================
 // searcher.js — Recherche web multi-source pour enrichir la revue
-// Cascade : NewsAPI → DDG HTML POST → SearXNG → Brave (optional)
+// Cascade parallèle : NewsAPI + DDG + SearXNG en course, premier gagnant
+// Brave en fallback optionnel
 // ============================================================
+
+import { extractTextFromHTML } from './extractor.js';
 
 const NEWSAPI_ENDPOINT = 'https://newsapi.org/v2/everything';
 const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
@@ -34,7 +37,7 @@ export async function searchNewsAPI(query, { numResults = 5, lang = 'fr', daysBa
     const resp = await fetch(`${NEWSAPI_ENDPOINT}?${params}`, {
       headers: {
         'X-Api-Key': env.NEWSAPI_KEY,
-        'User-Agent': 'RevueDePresse/2.1 (cloudflare-worker)',
+        'User-Agent': 'RevueDePresse/3.0 (cloudflare-worker)',
       },
       signal: AbortSignal.timeout(15000),
     });
@@ -89,11 +92,9 @@ export async function searchDDGHTML(query, { numResults = 5, lang = 'fr' } = {})
     const results = [];
 
     // Parser le HTML DDG — chercher les résultats organiques
-    // Les pubs ont des URLs commençant par //duckduckgo.com/y.js? — les ignorer
     const resultBlocks = html.split(/<div class="result[^"]*"/);
     for (const block of resultBlocks.slice(1)) {
       try {
-        // Extraire le lien et titre
         const linkMatch = block.match(/<a rel="nofollow" class="result__a" href="([^"]+)"/);
         const snippetMatch = block.match(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
 
@@ -113,7 +114,6 @@ export async function searchDDGHTML(query, { numResults = 5, lang = 'fr' } = {})
             } catch (e) { /* garder l'URL originale */ }
           }
 
-          // S'assurer qu'on a une URL absolue
           if (url.startsWith('//')) url = 'https:' + url;
           if (!url.startsWith('http')) continue;
 
@@ -199,7 +199,7 @@ export async function searchBrave(query, { numResults = 5, lang = 'fr', env } = 
       headers: {
         'X-Subscription-Token': env.BRAVE_API_KEY,
         'Accept': 'application/json',
-        'User-Agent': 'RevueDePresse/2.1 (cloudflare-worker)',
+        'User-Agent': 'RevueDePresse/3.0 (cloudflare-worker)',
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -224,27 +224,48 @@ export async function searchBrave(query, { numResults = 5, lang = 'fr', env } = 
 }
 
 // ============================================================
-// Recherche unifiée — Cascade
+// Recherche unifiée — Cascade parallèle (premier gagnant)
+// NewsAPI, DDG, SearXNG démarrent en parallèle.
+// Dès qu'un retourne des résultats, on l'utilise.
+// Brave est lancé en dernier recours si les 3 échouent.
 // ============================================================
 export async function webSearch(query, { numResults = 5, lang = 'fr', env } = {}) {
-  // 1. NewsAPI (gratuit, fiable)
-  const newsapi = await searchNewsAPI(query, { numResults, lang, daysBack: 2, env });
-  if (newsapi.results.length > 0) return newsapi;
+  const controller = new AbortController();
 
-  // 2. DuckDuckGo HTML POST
-  const ddg = await searchDDGHTML(query, { numResults, lang });
-  if (ddg.results.length > 0) return ddg;
+  // Lance les 3 sources principales en parallèle
+  const promises = [
+    searchNewsAPI(query, { numResults, lang, daysBack: 2, env }),
+    searchDDGHTML(query, { numResults, lang }),
+    searchSearXNG(query, { numResults, lang }),
+  ];
 
-  // 3. SearXNG (instances publiques)
-  const searxng = await searchSearXNG(query, { numResults, lang });
-  if (searxng.results.length > 0) return searxng;
+  // Attendre le premier qui retourne des résultats
+  for (const promise of promises) {
+    try {
+      const result = await Promise.race([
+        promise,
+        // Timeout global de 12s pour toute la cascade
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000)),
+      ]);
+      if (result.results.length > 0) {
+        controller.abort(); // Annuler les requêtes en cours
+        return result;
+      }
+    } catch (err) {
+      // Si timeout ou erreur, passer au suivant
+      if (err.message === 'timeout') break;
+      continue;
+    }
+  }
 
-  // 4. Brave (si clé disponible)
-  const brave = await searchBrave(query, { numResults, lang, env });
-  if (brave.results.length > 0) return brave;
-
-  // Retourner le dernier résultat (qui contient l'erreur)
-  return brave;
+  // Dernier recours : Brave (si clé disponible)
+  try {
+    const brave = await searchBrave(query, { numResults, lang, env });
+    if (brave.results.length > 0) return brave;
+    return brave; // Retourne même si vide (contient l'erreur)
+  } catch (err) {
+    return { results: [], source: 'none', error: `Toutes les sources ont échoué: ${err.message}` };
+  }
 }
 
 // ============================================================
@@ -266,8 +287,8 @@ export async function webSearchMultiLang(baseQuery, languages = ['fr', 'en'], pe
     }
 
     for (const item of result.results) {
-      const cleanUrl = item.url.split('?')[0].split('#')[0];
-      if (!seenUrls.has(cleanUrl)) {
+      const cleanUrl = item.url?.split('?')[0].split('#')[0];
+      if (cleanUrl && !seenUrls.has(cleanUrl)) {
         seenUrls.add(cleanUrl);
         allResults.push(item);
       }
@@ -293,8 +314,8 @@ export async function fetchSearchResultContent(url, maxWords = 500) {
     if (!resp.ok) return { text: '', error: `HTTP ${resp.status}` };
 
     const html = await resp.text();
-    const text = extractTextFromHTML(html);
-    const words = text.split(/\s+/).slice(0, maxWords).join(' ');
+    const extraction = extractTextFromHTML(html, maxWords);
+    const words = extraction.text.split(/\s+/).slice(0, maxWords).join(' ');
     return { text: words };
   } catch (err) {
     return { text: '', error: err.message };
@@ -304,16 +325,10 @@ export async function fetchSearchResultContent(url, maxWords = 500) {
 // ============================================================
 // Utilitaires HTML→texte (léger, pas de dépendance)
 // ============================================================
-export function extractTextFromHTML(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<\/h[1-6]>/gi, '\n\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
+
+/** Décode les entités HTML courantes */
+function decodeEntities(str) {
+  return str
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -326,13 +341,11 @@ export function extractTextFromHTML(html) {
     .replace(/&raquo;/g, '»')
     .replace(/&rsquo;/g, "'")
     .replace(/&lsquo;/g, "'")
-    .replace(/&#\d+;/g, '')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .replace(/&hellip;/g, '…')
+    .replace(/&#\d+;/g, '');
 }
 
 function extractText(html) {
   if (!html) return '';
-  return html.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
 }

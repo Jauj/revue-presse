@@ -1,5 +1,5 @@
 // ============================================================
-// index.js — Point d'entrée Cloudflare Worker v3.0
+// index.js — Point d'entrée Cloudflare Worker v3.1
 // 8 phases CoT : FETCH → FILTER → EXTRACT → THEME → DRAFT →
 //   REVIEW → SYNTHESIS → DELIVER
 // ============================================================
@@ -8,6 +8,8 @@ import {
   phaseFetch, phaseFilter, phaseExtract, phaseTheme, phaseDraft,
   phaseReview, phaseSynthesis, phaseDeliver, getStatus,
 } from './pipeline.js';
+
+const VERSION = '3.1.0';
 
 // Mapping minute cron → phase (8 phases espacées de 3 min)
 const PHASE_MAP = {
@@ -43,7 +45,7 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, {
-        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' },
+        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' },
       });
     }
 
@@ -52,7 +54,7 @@ export default {
     try {
       if (path === '/' && request.method === 'GET') {
         const status = await getStatus(env);
-        return new Response(JSON.stringify({ service: 'Revue de Presse CoT', version: '3.0.0', ...status }), { headers: cors });
+        return new Response(JSON.stringify({ service: 'Revue de Presse CoT', version: VERSION, ...status }), { headers: cors });
       }
 
       if (path === '/status' && request.method === 'GET') {
@@ -79,13 +81,14 @@ export default {
           return new Response(JSON.stringify({ triggered: 'all', stoppedAt: 'extract', ...results }), { status: 500, headers: cors });
         }
 
-        results.theme = await runPhase('theme', env, new Date());
-        results.draft = await runPhase('draft', env, new Date());
-        results.review = await runPhase('review', env, new Date());
-        results.synthesis = await runPhase('synthesis', env, new Date());
-        results.deliver = await runPhase('deliver', env, new Date());
+        // Les phases suivantes sont tolérantes : on continue même si une échoue
+        results.theme = await safeRunPhase('theme', env);
+        results.draft = await safeRunPhase('draft', env);
+        results.review = await safeRunPhase('review', env);
+        results.synthesis = await safeRunPhase('synthesis', env);
+        results.deliver = await safeRunPhase('deliver', env);
 
-        return new Response(JSON.stringify({ triggered: 'all', ...results }), { headers: cors });
+        return new Response(JSON.stringify({ triggered: 'all', version: VERSION, ...results }), { headers: cors });
       }
 
       // POST /trigger/<phase>
@@ -93,7 +96,7 @@ export default {
       if (triggerMatch && request.method === 'POST') {
         const phaseName = triggerMatch[1];
         const result = await runPhase(phaseName, env, new Date());
-        return new Response(JSON.stringify({ triggered: phaseName, ...result }), { headers: cors });
+        return new Response(JSON.stringify({ triggered: phaseName, version: VERSION, ...result }), { headers: cors });
       }
 
       // GET /test/search?q=...
@@ -131,6 +134,7 @@ export default {
 
       return new Response(JSON.stringify({
         error: 'Route non trouvée',
+        version: VERSION,
         routes: {
           'GET /': 'Statut global',
           'GET /status': 'Statut détaillé CoT',
@@ -149,7 +153,11 @@ export default {
       }), { status: 404, headers: cors });
 
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message, stack: err.stack }), { status: 500, headers: cors });
+      // Ne jamais exposer le stack en production
+      return new Response(JSON.stringify({
+        error: err.message,
+        version: VERSION,
+      }), { status: 500, headers: cors });
     }
   },
 };
@@ -165,5 +173,15 @@ async function runPhase(name, env, eventTime) {
     case 'synthesis': return phaseSynthesis(env, eventTime);
     case 'deliver': return phaseDeliver(env, eventTime);
     default: return { success: false, error: `Phase inconnue: ${name}` };
+  }
+}
+
+/** Exécute une phase sans propager l'erreur (pour /trigger/all) */
+async function safeRunPhase(name, env) {
+  try {
+    return await runPhase(name, env, new Date());
+  } catch (err) {
+    console.error(`[safeRunPhase] ${name}: ${err.message}`);
+    return { success: false, error: err.message };
   }
 }

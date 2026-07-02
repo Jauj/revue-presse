@@ -18,11 +18,11 @@ export async function fetchAllNewsAPIs(env, { maxPerSource = 10, daysBack = 2 } 
     { name: 'NYT', fn: () => fetchNYT(env, { max: maxPerSource }) },
     { name: 'Mediastack', fn: () => fetchMediastack(env, { max: maxPerSource, lang: 'fr' }) },
     { name: 'NewsData', fn: () => fetchNewsData(env, { max: maxPerSource, lang: 'fr' }) },
-    { name: 'NewsAPI', fn: () => fetchNewsAPI(env, { max: maxPerSource, lang: 'fr', daysBack }) },
+    { name: 'NewsAPI', fn: () => fetchNewsAPI(env, { max: maxPerSource, lang: 'fr', daysBack, query: 'France économie politique' }) },
     { name: 'Noozra', fn: () => fetchNoozra(env, { max: maxPerSource }) },
     { name: 'GNews-EN', fn: () => fetchGNews(env, { max: Math.ceil(maxPerSource / 2), lang: 'en' }) },
     { name: 'NYT-World', fn: () => fetchNYT(env, { max: Math.ceil(maxPerSource / 2), section: 'world' }) },
-    { name: 'NewsAPI-Search', fn: () => fetchNewsAPI(env, { max: Math.ceil(maxPerSource / 2), lang: 'en', daysBack, query: 'France Europe economy politics' }) },
+    { name: 'NewsAPI-EN', fn: () => fetchNewsAPI(env, { max: Math.ceil(maxPerSource / 2), lang: 'en', daysBack, query: 'Europe economy politics' }) },
     { name: 'Noozra-World', fn: () => fetchNoozra(env, { max: Math.ceil(maxPerSource / 2), category: 'world' }) },
   ];
 
@@ -194,7 +194,7 @@ async function fetchMediastack(env, { max = 10, lang = 'fr' } = {}) {
     limit: String(max),
   });
 
-  const resp = await fetch(`http://api.mediastack.com/v1/news?${params}`, { signal: AbortSignal.timeout(15000) });
+  const resp = await fetch(`https://api.mediastack.com/v1/news?${params}`, { signal: AbortSignal.timeout(15000) });
   if (!resp.ok) throw new Error(`Mediastack HTTP ${resp.status}`);
   const data = await resp.json();
 

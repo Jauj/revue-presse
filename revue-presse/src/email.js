@@ -1,5 +1,6 @@
 // ============================================================
 // email.js — Construction et envoi de l'email via Resend
+// Markdown → HTML robuste avec support émojis, sections Smart Brevity
 // ============================================================
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
@@ -7,7 +8,7 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 /**
  * Génère l'email HTML de la revue de presse
  */
-export function buildEmailHTML(review, articles, date) {
+export function buildEmailHTML(review, articles, date, provider) {
   const dateStr = date.toLocaleDateString('fr-FR', {
     weekday: 'long',
     year: 'numeric',
@@ -21,6 +22,9 @@ export function buildEmailHTML(review, articles, date) {
 
   // Convertir le Markdown de l'IA en HTML
   const reviewHTML = markdownToHTML(review);
+
+  const providerLabel = provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'IA';
+  const providerBadge = `<div class="provider-badge">Modèle : ${providerLabel}</div>`;
 
   const html = `<!DOCTYPE html>
 <html>
@@ -36,12 +40,13 @@ export function buildEmailHTML(review, articles, date) {
     .header .stats { margin-top: 12px; display: flex; gap: 20px; font-size: 13px; opacity: 0.9; }
     .header .stats span { display: inline-flex; align-items: center; gap: 5px; }
     .content { padding: 25px 30px 30px; }
-    .content h2 { color: #1a1a2e; font-size: 18px; margin: 25px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e94560; }
+    .content h2 { color: #1a1a2e; font-size: 18px; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e94560; }
     .content h2:first-child { margin-top: 0; }
     .content h3 { color: #0f3460; font-size: 15px; margin: 18px 0 8px; }
+    .content h4 { color: #333; font-size: 14px; margin: 14px 0 6px; }
     .content p { margin: 8px 0; font-size: 14px; color: #333; }
-    .content ul { margin: 8px 0; padding-left: 20px; }
-    .content li { margin: 6px 0; font-size: 14px; color: #333; }
+    .content ul, .content ol { margin: 8px 0; padding-left: 22px; }
+    .content li { margin: 5px 0; font-size: 14px; color: #333; }
     .content strong { color: #1a1a2e; }
     .content em { color: #666; font-size: 13px; }
     .content hr { border: none; border-top: 1px solid #eee; margin: 25px 0; }
@@ -64,6 +69,7 @@ export function buildEmailHTML(review, articles, date) {
     </div>
     <div class="content">
       ${reviewHTML}
+      ${providerBadge}
     </div>
     <div class="footer">
       Revue de Presse automatique — Cloudflare Workers — ${dateStr}
@@ -76,52 +82,136 @@ export function buildEmailHTML(review, articles, date) {
 }
 
 /**
+ * Génère la version plaintext pour l'email (accessibilité + preview)
+ */
+export function buildEmailText(review, articles, date) {
+  const dateStr = date.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Europe/Paris',
+  });
+
+  let text = `REVUE DE PRESSE — ${dateStr.toUpperCase()}\n`;
+  text += `${'='.repeat(50)}\n\n`;
+
+  // Nettoyer le markdown : supprimer les émojis et formatter pour texte pur
+  const cleaned = review
+    .replace(/[📌📰🔍📊🔮⚠️]/g, '')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/^---$/gm, '─'.repeat(50))
+    .replace(/^#{1,4}\s/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\n{3,}/g, '\n\n');
+
+  text += cleaned.trim();
+  text += `\n\n${'─'.repeat(50)}\n`;
+  text += `Sources : ${[...new Set(articles.map(a => a.sourceName))].join(', ')}\n`;
+
+  return text;
+}
+
+/**
  * Convertit le Markdown simplifié en HTML
- * Gère : titres, listes, gras, italique, liens, traits horizontaux
+ * Gère : titres, listes, gras, italique, liens, traits horizontaux, émojis
+ * IMPORTANT : on n'échappe PAS le HTML en entrée car l'IA ne produit pas de HTML,
+ * seulement du markdown avec de possibles entités
  */
 function markdownToHTML(md) {
   if (!md) return '<p>Aucun contenu généré.</p>';
 
   let html = md;
 
-  // Échapper le HTML existant sauf nos balises
-  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  // Traits horizontaux
+  // Traits horizontaux (avant les titres pour éviter les conflits)
   html = html.replace(/^---$/gm, '<hr>');
 
-  // Titres
+  // Titres markdown (h4 avant h3 avant h2 avant h1)
   html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-  // Listes à puces
-  html = html.replace(/^• (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/^(\-|\*) (.+)$/gm, '<li>$2</li>');
-  // Wrapper les <li> consécutifs dans des <ul>
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+  // Listes à puces — d'abord marquer chaque item
+  // Supporte : • , - , * en début de ligne
+  html = html.replace(/^[•\-\*] (.+)$/gm, '\x00LI\x00$1\x00/LI\x00');
 
-  // Gras et italique
+  // Wrapper les <li> consécutifs dans des <ul>
+  html = html.replace(/((?:\x00LI\x00.*?\x00\/LI\x00\n?)+)/g, (match) => {
+    return '<ul>' + match.replace(/\x00LI\x00/g, '<li>').replace(/\x00\/LI\x00/g, '</li>') + '</ul>';
+  });
+
+  // Gras et italique (ordre important : *** > ** > *)
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
   // Liens Markdown
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 
-  // Paragraphes : les lignes restantes deviennent des <p>
-  html = html.replace(/^(?!<[a-z]|$)(.+)$/gm, '<p>$1</p>');
+  // Échapper le HTML potentiellement dangereux DANS les paragraphes
+  // mais pas les balises qu'on vient de générer
+  // Stratégie : protéger nos balises, échapper le reste, restaurer
+  const safeTags = [];
+  html = html.replace(/<(\/?(?:h[1-6]|ul|ol|li|p|strong|em|a|hr|br)\b[^>]*)>/gi, (match) => {
+    safeTags.push(match);
+    return `\x00TAG${safeTags.length - 1}\x00`;
+  });
 
-  // Nettoyer les <p> vides
+  // Échapper < et & dans le texte brut restant
+  html = html.replace(/&/g, '&amp;');
+  html = html.replace(/</g, '&lt;');
+  html = html.replace(/>/g, '&gt;');
+
+  // Restaurer nos balises
+  html = html.replace(/\x00TAG(\d+)\x00/g, (_, idx) => safeTags[parseInt(idx)]);
+
+  // Paragraphes : les lignes restantes deviennent des <p>
+  // Ne pas wrapper les lignes vides ou celles commençant par une balise
+  html = html.replace(/^(?!<[a-z\x00]|$)(.+)$/gm, '<p>$1</p>');
+
+  // Nettoyer les <p> vides et les <p> autour de balises block
   html = html.replace(/<p>\s*<\/p>/g, '');
+  html = html.replace(/<p>(<(?:h[1-6]|ul|ol|hr))/g, '$1');
+  html = html.replace(/(<\/(?:h[1-6]|ul|ol)>)\s*<\/p>/g, '$1');
 
   return html;
 }
 
 /**
+ * Génère le sujet de l'email avec un aperçu du contenu principal
+ */
+export function buildSubject(date, reviewContent) {
+  const dateStr = date.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
+  // Essayer d'extraire le premier thème clé du contenu
+  let topic = '';
+  if (reviewContent) {
+    // Chercher le premier élément après "L'ESSENTIEL DU JOUR" ou après un h2
+    const essentialsMatch = reviewContent.match(/L'ESSENTIEL DU JOUR[\s\S]*?\n\n[\s\S]*?(.+?)(?:\n|$)/);
+    if (essentialsMatch) {
+      // Prendre la première ligne de contenu substantiel
+      topic = essentialsMatch[1].replace(/[**📌—]/g, '').trim().substring(0, 80);
+    }
+  }
+
+  if (topic && topic.length > 10) {
+    return `Revue de Presse — ${dateStr} — ${topic}`;
+  }
+  return `Revue de Presse — ${dateStr}`;
+}
+
+/**
  * Envoie l'email via Resend
  */
-export async function sendEmail(env, subject, htmlContent) {
+export async function sendEmail(env, subject, htmlContent, textContent) {
   const apiKey = env.RESEND_API_KEY;
   const to = env.DESTINATION_EMAIL;
 
@@ -132,18 +222,25 @@ export async function sendEmail(env, subject, htmlContent) {
     throw new Error('DESTINATION_EMAIL non configuré');
   }
 
+  const payload = {
+    from: 'Revue de Presse <onboarding@resend.dev>',
+    to: [to],
+    subject,
+    html: htmlContent,
+  };
+
+  // Ajouter la version texte si disponible (meilleure délivrabilité)
+  if (textContent) {
+    payload.text = textContent;
+  }
+
   const response = await fetch(RESEND_ENDPOINT, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from: 'Revue de Presse <onboarding@resend.dev>',
-      to: [to],
-      subject,
-      html: htmlContent,
-    }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(30000),
   });
 
@@ -154,17 +251,4 @@ export async function sendEmail(env, subject, htmlContent) {
 
   const data = await response.json();
   return data;
-}
-
-/**
- * Génère le sujet de l'email
- */
-export function buildSubject(date) {
-  const dateStr = date.toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-
-  return `Revue de Presse — ${dateStr}`;
 }

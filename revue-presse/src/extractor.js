@@ -1,11 +1,12 @@
 // ============================================================
 // extractor.js — Extraction du texte depuis le HTML
-// Utilise HTMLRewriter (natif Cloudflare Workers, zéro dépendance)
+// Stratégie : <article> > <main> > [role=article] > JSON-LD > body nettoyé
+// Regex-only (pas de HTMLRewriter — plus léger et fiable dans CF Workers)
 // ============================================================
 
 /**
  * Extrait le texte propre d'un article HTML
- * Stratégie : <article> > <main> > [role=article] > <body> nettoyé
+ * Stratégie : <article> > <main> > [role=article] > JSON-LD > <body> nettoyé
  */
 export function extractTextFromHTML(html, maxWords = 1500) {
   let bestContent = '';
@@ -32,7 +33,16 @@ export function extractTextFromHTML(html, maxWords = 1500) {
     bestSelector = 'role=article';
   }
 
-  // --- Stratégie 4 : Body complet nettoyé (fallback) ---
+  // --- Stratégie 4 : JSON-LD articleBody (très fiable pour les articles structurés) ---
+  if (bestContent.length < 500) {
+    const jsonLdBody = extractJSONLDBody(html);
+    if (jsonLdBody.length > bestContent.length) {
+      bestContent = jsonLdBody;
+      bestSelector = 'json-ld';
+    }
+  }
+
+  // --- Stratégie 5 : Body complet nettoyé (fallback) ---
   if (bestContent.length < 300) {
     const bodyContent = extractBody(html);
     if (bodyContent.length > bestContent.length) {
@@ -58,55 +68,15 @@ export function extractTextFromHTML(html, maxWords = 1500) {
 }
 
 /**
- * Extrait le contenu d'une balise spécifique via HTMLRewriter
+ * Extrait le contenu d'une balise spécifique via regex
  */
 function extractElement(html, tagName) {
-  let content = '';
-  let depth = 0;
-  let capturing = false;
-
-  // Utiliser HTMLRewriter pour une extraction fiable
-  const rewriter = new HTMLRewriter()
-    .on(tagName, {
-      element() {
-        if (!capturing) {
-          capturing = true;
-          depth = 1;
-        } else {
-          depth++;
-        }
-      },
-      text(text) {
-        if (capturing) {
-          content += text.text;
-        }
-      },
-    })
-    .on('*', {
-      element() {
-        if (capturing) {
-          depth++;
-        }
-      },
-      text(text) {
-        if (capturing) {
-          content += text.text;
-        }
-      },
-    });
-
-  // HTMLRewriter transforme un Response, on simule avec un Response vide
-  const response = new Response(html, { headers: { 'Content-Type': 'text/html' } });
-  const transformed = rewriter.transform(response);
-
-  // Alternative plus simple et fiable : regex (légère pour le CPU)
   const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
   const match = html.match(regex);
   if (match) {
     return stripTags(match[1]);
   }
-
-  return content;
+  return '';
 }
 
 /**
@@ -117,6 +87,36 @@ function extractByAttr(html, attrName, attrValue) {
   const match = html.match(regex);
   if (match) {
     return stripTags(match[1]);
+  }
+  return '';
+}
+
+/**
+ * Extrait le articleBody depuis un script JSON-LD (très fiable)
+ */
+function extractJSONLDBody(html) {
+  const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  for (const match of jsonLdMatches) {
+    try {
+      const data = JSON.parse(match[1]);
+      // Chercher articleBody directement ou dans un tableau @graph
+      const candidates = Array.isArray(data) ? data : [data];
+      for (const item of candidates) {
+        if (item.articleBody && item.articleBody.length > 200) {
+          return item.articleBody;
+        }
+        // Parfois imbriqué dans @graph
+        if (item['@graph'] && Array.isArray(item['@graph'])) {
+          for (const graphItem of item['@graph']) {
+            if (graphItem.articleBody && graphItem.articleBody.length > 200) {
+              return graphItem.articleBody;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Ignorer les erreurs de parsing JSON-LD
+    }
   }
   return '';
 }
@@ -260,8 +260,8 @@ export function extractMetadata(html) {
     try {
       const data = JSON.parse(jsonLd[1]);
       if (data.articleBody) meta.articleBody = data.articleBody;
-      if (data.description) meta.description = data.description || meta.description;
-      if (data.headline) meta.title = data.headline || meta.title;
+      if (data.description) meta.description = meta.description || data.description;
+      if (data.headline) meta.title = meta.title || data.headline;
     } catch (e) {
       // Ignorer les erreurs de parsing JSON-LD
     }
