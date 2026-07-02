@@ -3,14 +3,15 @@ main = "src/index.js"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# === CRON TRIGGERS (7 phases CoT espacées de 3 min) ===
-# Phase 1 (min 0)  : FETCH — Récupération RSS + extraction articles
-# Phase 2 (min 3)  : EXTRACT — IA extraction des faits structurés
-# Phase 3 (min 6)  : THEME — IA thématisation et regroupement
-# Phase 4 (min 9)  : DRAFT — IA rédaction brouillon Smart Brevity
-# Phase 5 (min 12) : REVIEW — IA revue critique auto-évaluation
-# Phase 6 (min 15) : SYNTHESIS — IA synthèse EIC (2 appels espacés 10s)
-# Phase 7 (min 18) : DELIVER — Envoi email
+# === CRON TRIGGERS (8 phases CoT espacées de 3 min) ===
+# Phase 1 (min 0)  : FETCH — RSS + News APIs en parallèle
+# Phase 2 (min 3)  : FILTER — Dédup + scoring + extraction texte
+# Phase 3 (min 6)  : EXTRACT — IA extraction (parallèle par batch)
+# Phase 4 (min 9)  : THEME — IA thématisation
+# Phase 5 (min 12) : DRAFT — IA rédaction + recherche web
+# Phase 6 (min 15) : REVIEW — IA revue critique
+# Phase 7 (min 18) : SYNTHESIS — IA synthèse EIC (2 appels)
+# Phase 8 (min 21) : DELIVER — Envoi email
 [triggers]
 crons = [
   "0 6 * * 1-5",
@@ -20,6 +21,7 @@ crons = [
   "12 6 * * 1-5",
   "15 6 * * 1-5",
   "18 6 * * 1-5",
+  "21 6 * * 1-5",
 ]
 
 # === KV Namespace (bus inter-phases) ===
@@ -31,9 +33,10 @@ id = "ef1ef185628f45d9bc6f9d5c209b0efe"
 [vars]
 DESTINATION_EMAIL = "ferrierjonas@gmail.com"
 TIMEZONE = "Europe/Paris"
-MAX_ARTICLES = "30"
+MAX_ARTICLES = "50"
 MAX_WORDS_PER_ARTICLE = "1500"
 AI_PROVIDER = "auto"
+PUBLIC_URL = "https://revue-presse.jeanneaj.workers.dev"
 
 # === Workers AI (fallback natif) ===
 [ai]
