@@ -3,26 +3,12 @@ main = "src/index.js"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# === CRON TRIGGERS (8 phases CoT espacées de 3 min) ===
-# Phase 1 (min 0)  : FETCH — RSS + News APIs en parallèle
-# Phase 2 (min 3)  : FILTER — Dédup + scoring + extraction texte
-# Phase 3 (min 6)  : EXTRACT — IA extraction (parallèle par batch)
-# Phase 4 (min 9)  : THEME — IA thématisation
-# Phase 5 (min 12) : DRAFT — IA rédaction + recherche web
-# Phase 6 (min 15) : REVIEW — IA revue critique
-# Phase 7 (min 18) : SYNTHESIS — IA synthèse EIC (2 appels)
-# Phase 8 (min 21) : DELIVER — Envoi email
+# === CRON TRIGGER (pipeline complet séquentiel) ===
+# Un seul cron lance les 8 phases enchaînées.
+# Nécessite Workers Paid ($5/mois) pour le temps d'exécution (15 min).
+# Sur le plan gratuit, utiliser POST /trigger/all manuellement.
 [triggers]
-crons = [
-  "0 6 * * 1-5",
-  "3 6 * * 1-5",
-  "6 6 * * 1-5",
-  "9 6 * * 1-5",
-  "12 6 * * 1-5",
-  "15 6 * * 1-5",
-  "18 6 * * 1-5",
-  "21 6 * * 1-5",
-]
+crons = ["0 6 * * 1-5"]
 
 # === KV Namespace (bus inter-phases) ===
 [[kv_namespaces]]

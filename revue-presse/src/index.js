@@ -11,32 +11,35 @@ import {
 
 const VERSION = '3.1.0';
 
-// Mapping minute cron → phase (8 phases espacées de 3 min)
-const PHASE_MAP = {
-  0: 'fetch',
-  3: 'filter',
-  6: 'extract',
-  9: 'theme',
-  12: 'draft',
-  15: 'review',
-  18: 'synthesis',
-  21: 'deliver',
-};
-
 export default {
   async scheduled(event, env, ctx) {
-    const minute = parseInt(event.cron.split(' ')[0]);
-    const phase = PHASE_MAP[minute];
+    console.log(`[Cron] Pipeline complet démarré à ${event.scheduledTime}`);
+    const results = {};
+    const eventTime = new Date(event.scheduledTime);
 
-    if (!phase) {
-      console.log(`Cron non reconnu (minute ${minute}): ${event.cron}`);
-      return { error: 'Cron non reconnu', minute };
+    // Phase critiques : arrêt si échec
+    results.fetch = await runPhase('fetch', env, eventTime);
+    if (!results.fetch.success) {
+      console.error(`[Cron] Arrêt à FETCH: ${results.fetch.error}`);
+      return results;
     }
 
-    console.log(`[Phase ${phase}] Démarrage...`);
-    const result = await runPhase(phase, env, new Date(event.scheduledTime));
-    console.log(`[Phase ${phase}] Terminé:`, JSON.stringify(result));
-    return result;
+    results.filter = await runPhase('filter', env, eventTime);
+    if (!results.filter.success) {
+      console.error(`[Cron] Arrêt à FILTER: ${results.filter.error}`);
+      return results;
+    }
+
+    // Phases tardives : tolérantes aux erreurs
+    results.extract = await safeRunPhase('extract', env);
+    results.theme = await safeRunPhase('theme', env);
+    results.draft = await safeRunPhase('draft', env);
+    results.review = await safeRunPhase('review', env);
+    results.synthesis = await safeRunPhase('synthesis', env);
+    results.deliver = await safeRunPhase('deliver', env);
+
+    console.log(`[Cron] Pipeline terminé — deliver: ${results.deliver?.success}`);
+    return results;
   },
 
   async fetch(request, env, ctx) {
