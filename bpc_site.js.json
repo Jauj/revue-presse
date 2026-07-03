@@ -1,0 +1,55 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "external": {
+      "icon": {
+        "https://gitflic.ru/static/image/favicon/favicon.ico": {
+          "type": "image/x-icon"
+        }
+      },
+      "manifest": {
+        "https://gitflic.ru/static/image/favicon/manifest.json": {}
+      },
+      "modulepreload": {
+        "https://gitflic.ru/static/vue/js/_plugin-vue_export-helper.DlAUqK2U.js": {
+          "as": "script",
+          "crossorigin": ""
+        },
+        "https://gitflic.ru/static/vue/js/project-layout.To60nXBm.js": {
+          "as": "script",
+          "crossorigin": ""
+        }
+      }
+    },
+    "html": "<html lang=\"ru\"><head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, shrink-to-fit=no\">\n    <meta name=\"description\" content=\"\">\n        <meta name=\"_csrf\" content=\"755eb7b9-41a7-484e-9108-07b24a1848f7\">\n        <meta name=\"_csrf_header\" content=\"X-CSRF-TOKEN\">\n    <title>404 Error GitFlic</title>\n    \n        <meta name=\"userLocale\" content=\"en\">\n\n    <meta name=\"theme-color\" content=\"#f8f9fa\" media=\"(prefers-color-scheme: light)\">\n    <meta name=\"theme-color\" content=\"#25282d\" media=\"(prefers-color-scheme: dark)\">\n    <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n    <meta name=\"format-detection\" content=\"telephone=no\">\n    <link type=\"image/x-icon\" rel=\"shortcut icon\" href=\"/static/image/favicon/favicon.ico\">  \n    <link rel=\"manifest\" href=\"/static/image/favicon/manifest.json\">\n    <link href=\"/static/css/main.min.css?v=4.12.1&amp;t=1781873761\" rel=\"stylesheet\">\n    <link href=\"/static/css/style.css?v=4.12.1&amp;t=1781873761\" rel=\"stylesheet\">\n    <link href=\"/static/css/gf-icons-font.css?v=4.12.1&amp;t=1781873761\" rel=\"stylesheet\">\n  <link rel=\"modulepreload\" as=\"script\" crossorigin=\"\" href=\"/static/vue/js/project-layout.To60nXBm.js\"><link rel=\"modulepreload\" as=\"script\" crossorigin=\"\" href=\"/static/vue/js/_plugin-vue_export-helper.DlAUqK2U.js\"></head>\n\n  <body class=\"--theme-auto\">\n      <div class=\"cookies\">\n        <div class=\"cookies-alert\">\n          <div class=\"cookies-alert-layout\">\n            <p class=\"cookies-text m-0\">\n              Я соглашаюсь с использованием файлов cookie владельцем сайта в соответствии с <a href=\"https://gitflic.ru/docs/cookie-policy\">Политикой обработки файлов сookie gitflic.ru</a> и <a href=\"https://gitflic.ru/docs/policy\">Положением по обработке и защите персональных данных gitflic.ru</a>, в том числе на передачу данных из файлов cookie сторонним статистическим и рекламным службам, указанным в <a href=\"https://gitflic.ru/docs/cookie-policy\">Политике обработки файлов сookie gitflic.ru</a>.\n            </p>\n            <button type=\"button\" class=\"cookies-text cookiesBtn btn\">\n              Принять\n            </button>\n          </div>\n        </div>\n      </div>\n      \n\n  <div id=\"app\" style=\"padding:0 !important\" data-v-app=\"\"><nav class=\"navbar navbar-main\"><a class=\"navbar-main__logo\" href=\"/\"><i class=\"gf-icon gf-icon-gf-logo-with-text\" style=\"color: var(--logo-color); font-size: 30px;\"></i></a> <button class=\"navbar-toggler position-absolute d-md-none js-navbar-toggler\" type=\"button\"><span></span> <span></span> <span></span></button> <ul class=\"navbar-nav flex-md-row justify-content-end\"><li class=\"nav-item d-flex align-items-center\"><form class=\"header__search\" method=\"get\" action=\"/search/project\"><div class=\"input-group input-group-sm\"><input name=\"q\" type=\"search\" class=\"form-control bg-light navigation-search-field\" aria-label=\"Search\" placeholder=\"Search\" aria-describedby=\"search-label\" style=\"border-top-left-radius: 0.4rem !important; border-bottom-left-radius: 0.4rem !important; min-width: 170px;\"> <button type=\"submit\" class=\"input-group-append rounded-right\" style=\"border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; padding: 3.5px 0px; background: rgb(233, 236, 239);\"><span class=\"d-flex align-items-center input-group-text text-muted my-auto\" id=\"search-label\" style=\"border-width: medium; border-style: none; border-color: currentcolor; border-image: initial;\"><i class=\"gf-icon gf-icon-search\"></i></span></button></div></form></li> <li class=\"d-flex align-items-center theme-wrapper\"><fieldset class=\"supple-scheme-switcher\"><legend class=\"supple-scheme-switcher__legend\">Цветовая схема</legend> <input class=\"supple-scheme-switcher__radio supple-scheme-switcher__radio--light\" type=\"radio\" name=\"color-scheme\" aria-label=\"Светлая\" title=\"Light\" value=\"light\"> <input class=\"supple-scheme-switcher__radio supple-scheme-switcher__radio--auto\" type=\"radio\" name=\"color-scheme\" aria-label=\"Системная\" title=\"System\" checked=\"\" value=\"auto\"> <input class=\"supple-scheme-switcher__radio supple-scheme-switcher__radio--dark\" type=\"radio\" name=\"color-scheme\" aria-label=\"Тёмная\" title=\"Dark\" value=\"dark\"> <div class=\"supple-scheme-switcher__status\"></div></fieldset></li> <form class=\"navbar-locale js-navbar-locale-change\"><input type=\"hidden\" name=\"_csrf\" value=\"755eb7b9-41a7-484e-9108-07b24a1848f7\"> <div class=\"navbar-locale__wrapper\"><button class=\"navbar-locale__button --ru\" type=\"submit\" name=\"lang\" title=\"RU\" value=\"ru\"></button> <button class=\"navbar-locale__button --en --active\" type=\"submit\" name=\"lang\" title=\"ENG\" value=\"en\"></button></div></form> <li class=\"nav-item\"><a class=\"nav-link\" href=\"/auth/login?referer=true\">\nВойти              </a></li></ul></nav> <div class=\"container\"><div class=\"row\"><main role=\"main\" class=\"col-12 ml-sm-auto px-0 d-flex flex-column\" style=\"height: calc(-48px + 100vh);\"><div class=\"d-flex flex-column\"><div style=\"width: 100vw; height: 70vh; margin-top: 38px; margin-left: 50%; transform: translateX(-50%);\"><img src=\"/static/image/error/404.svg\" style=\"width: 100%; height: 100%; object-fit: cover; object-position: 55% center;\"></div> <div class=\"d-flex justify-content-center mt-4\"><h4 class=\"text-center\">Извините, но мы ничего не нашли.\n                    <a href=\"/auth/login?referer=true\">Войти</a></h4></div></div> <footer class=\"footer mt-auto pt-5 d-flex flex-column\"><div class=\"d-flex flex-column flex-md-row justify-content-center border-top py-2\"><div class=\"d-flex px-3 mb-0 w-100 flex-column flex-md-row\"><a href=\"/\" title=\"GitFlic\"><span class=\"footer__logo\"><i class=\"gf-icon gf-icon-gf-logo\" style=\"font-size: 37px; color: var(--logo-color);\"></i></span></a> <div class=\"d-flex flex-column ml-2 align-items-center align-items-md-start\"><div class=\"d-flex\">\n                  4.12.1\n              </div> <div class=\"d-flex text-muted small\">\n                  2026-06-19 12:56:01\n              </div></div> <div class=\"d-flex gap-3 ml-md-auto align-items-center flex-column flex-md-row\"><a class=\"d-flex align-items-center text-muted\" href=\"mailto:support@gitflic.ru\" target=\"_blank\"><i class=\"gf-icon gf-icon gf-icon gf-icon-mail mr-1\"></i>\n              support@gitflic.ru\n            </a> <a href=\"https://gitflic.ru/contact\" class=\"text-muted\">\nContacts            </a></div></div></div></footer></main></div></div></div>\n\n    <script type=\"module\" src=\"/static/vue/js/app.Q2cgN6hk.js\"></script>\n\n  <!-- Yandex.Metrika counter -->\n  <!-- /Yandex.Metrika counter -->\n\n  \n  \n</body></html>",
+    "httpStatus": 404,
+    "httpStatusText": "",
+    "metadata": {
+      "_csrf": "755eb7b9-41a7-484e-9108-07b24a1848f7",
+      "_csrf_header": "X-CSRF-TOKEN",
+      "apple-mobile-web-app-capable": "yes",
+      "description": "",
+      "format-detection": "telephone=no",
+      "lang": "ru",
+      "theme-color": [
+        "#f8f9fa",
+        "#25282d"
+      ],
+      "userLocale": "en",
+      "viewport": "width=device-width, initial-scale=1, shrink-to-fit=no"
+    },
+    "title": "404 Error GitFlic",
+    "url": "https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean/blob",
+    "usage": {
+      "tokens": 1903
+    },
+    "warning": "Target URL returned error 404: Not Found"
+  },
+  "meta": {
+    "usage": {
+      "tokens": 1903
+    }
+  },
+  "status": 20000
+}

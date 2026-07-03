@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://docs.searxng.org/dev/search_api.html",
+    "name": "Search API - SearXNG Documentation (2026.6.30+d115c61a7)",
+    "snippet": "SearXNG supports querying via a simple HTTP API. Two endpoints, / and /search , If you want to consume the results as JSON, CSV, or RSS, you need to set the ...",
+    "host_name": "docs.searxng.org",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/Searx/comments/1g3egc4/public_searxng_instance_that_supports_json",
+    "name": "Public Searxng instance that supports json? : r/Searx - Reddit",
+    "snippet": "I would like to use Searxng in Open WebUI but need an instance that supports json. Are there any public instances that support json formatting?",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.litellm.ai/docs/search/searxng",
+    "name": "SearXNG Search - LiteLLM Docs",
+    "snippet": "SearXNG is a free, open-source metasearch engine that aggregates results from multiple search engines while protecting user privacy. It can be self-hosted or ...",
+    "host_name": "docs.litellm.ai",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://searxng.org",
+    "name": "SearXNG Documentation (2026.6.30+d115c61a7)",
+    "snippet": "SearXNG is a free internet metasearch engine which aggregates results from up to 280 search services. Users are neither tracked nor profiled. Search API Plugins\nWelcome to SearXNG¶. Search without being tracked. SearXNG is a free internet metasearch engine which aggregates results from up to 280 search services.",
+    "host_name": "searxng.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://lagnchain.readthedocs.io/en/latest/ecosystem/searx.html",
+    "name": "SearxNG Search API — LangChain 0.0.149",
+    "snippet": "This page covers how to use the SearxNG search API within LangChain. You need to activate the json format to use the API. return a JSON object with the results.\nThis page covers how to use the SearxNG search API within LangChain. You need to activate the json format to use the API. should return a JSON object with the ...",
+    "host_name": "lagnchain.readthedocs.io",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/thedoggybrad/thesearxng",
+    "name": "thedoggybrad/thesearxng: The SearXNG gateway and UI  - GitHub",
+    "snippet": "It aims to deliver a randomized SearXNG searching experience with the focus on making your search data not only sent to a single instance.",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://searx.space",
+    "name": "SearXNG instances",
+    "snippet": "Online and offline SearXNG instances. The instances have to send the Server-Timing header to providing the Server, Load, Network and Processing times.",
+    "host_name": "searx.space",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://forum.cloudron.io/topic/12201/openwebui-has-an-option-for-a-searxng-api-key",
+    "name": "OpenWebUI has an option for a SearXNG API key - Cloudron Forum",
+    "snippet": "If you are using Cloudron, you can run both OpenWebUI and an instance of SearXNG to create an API key to provide yourself with search capability.",
+    "host_name": "forum.cloudron.io",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

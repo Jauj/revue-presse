@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com/badgiovi/news-editor-agent",
+    "name": "GitHub - badgiovi/news-editor-agent: Turn raw RSS feeds into hyper",
+    "snippet": "News Editor Agent treats news analysis as a multi-step consensus problem rather than a single inference task. The project utilizes a Mixture-of-Agents ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Jenqyang/Awesome-AI-Agents",
+    "name": "Jenqyang/Awesome-AI-Agents: A collection of autonomous  - GitHub",
+    "snippet": "Open-source Large Language Model (LLM) driven autonomous agent that can automatically solve various tasks.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Jun 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@shubham.shardul2019/how-i-built-an-autonomous-multi-agentic-news-engine-full-implementation-ef09a2f00f33",
+    "name": "How I Built an Autonomous, LangGraph Multi-Agentic News Engine",
+    "snippet": "So, I built an autonomous, self-deploying GenAI News Agent. ... Agent that can plan, call the web for live research, offload… A clap ...",
+    "host_name": "medium.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/assafelovic/gpt-researcher",
+    "name": "assafelovic/gpt-researcher: An autonomous agent that  - GitHub",
+    "snippet": "GPT Researcher the first open deep research agent designed for both web and local research on any given task. The agent produces detailed, factual, ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/ai-news-agent",
+    "name": "ai-news-agent · GitHub Topics",
+    "snippet": "AI News Agent is an automated news aggregation and summarization system powered by CrewAI. It uses AI agents to curate, analyze, and deliver personalized news ...",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

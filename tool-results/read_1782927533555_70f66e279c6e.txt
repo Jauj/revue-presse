@@ -1,0 +1,663 @@
+     1→     1→// ============================================================
+     2→     2→// pipeline.js — 5 phases du traitement CoT (limite 5 crons CF)
+     3→     3→// Phase 1 (FETCH) -> 2 (COT-1: Extract+Theme) -> 3 (COT-2: Research+Draft+Review)
+     4→     4→//   -> 4 (COT-3: Synthesis) -> 5 (DELIVER)
+     5→     5→// Chaque phase COT = 2 appels IA espaces de 10s + boucle recherche
+     6→     6→// ============================================================
+     7→     7→
+     8→     8→import { fetchAllFeeds, fetchFullArticle } from './fetcher.js';
+     9→     9→import { extractTextFromHTML, isPaywallPage } from './extractor.js';
+    10→    10→import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis, stageDeepDive } from './ai.js';
+    11→    11→import { buildEmailHTML, buildSubject, buildDeepDiveEmailHTML, buildDeepDiveSubject, sendEmail } from './email.js';
+    12→    12→import { SOURCES } from './sources.js';
+    13→    13→import {
+    14→    14→  getMemoryContext, saveDailyMemory, updateSemanticMemory,
+    15→    15→  updateNarratives, dreamDistill, getMemoryStats,
+    16→    16→} from './memory.js';
+    17→    17→import { webSearchMultiLang, fetchSearchResultContent } from './searcher.js';
+    18→    18→import { enrichArticle, isLikelyPaywalled } from './paywall.js';
+    19→    19→
+    20→    20→// Clés KV pour le bus inter-phases
+    21→    21→const KV_ARTICLES = 'pipeline:articles';
+    22→    22→const KV_EXTRACTION = 'pipeline:stage1_extraction';
+    23→    23→const KV_THEMES = 'pipeline:stage2_themes';
+    24→    24→const KV_DRAFT = 'pipeline:stage3_draft';
+    25→    25→const KV_REVIEW = 'pipeline:stage4_review';
+    26→    26→const KV_SYNTHESIS = 'pipeline:stage5_synthesis';
+    27→    27→const KV_REVIEW_FINAL = 'pipeline:review_final';
+    28→    28→const KV_STATUS = 'pipeline:status';
+    29→    29→const KV_ERRORS = 'pipeline:errors';
+    30→    30→const KV_RESEARCH = 'pipeline:research_results';
+    31→    31→
+    32→    32→function statusKey(phase) { return `pipeline:phase_${phase}_status`; }
+    33→    33→
+    34→    34→// Trouver la config source pour un article
+    35→    35→function findSourceConfig(sourceName) {
+    36→    36→  return SOURCES.find(s => s.name === sourceName);
+    37→    37→}
+    38→    38→
+    39→    39→// Trouver la config source pour un article par URL
+    40→    40→function findSourceConfigByUrl(url) {
+    41→    41→  if (!url) return null;
+    42→    42→  return SOURCES.find(s => url.includes(new URL(s.url).hostname)) || null;
+    43→    43→}
+    44→    44→
+    45→    45→// ============================================================
+    46→    46→// PHASE 1 — FETCH : RSS + extraction articles
+    47→    47→// ============================================================
+    48→    48→export async function phaseFetch(env, eventTime) {
+    49→    49→  const status = { phase: 'fetch', startedAt: eventTime.toISOString(), step: 'init' };
+    50→    50→  const errors = [];
+    51→    51→
+    52→    52→  try {
+    53→    53→    const maxArticles = parseInt(env.MAX_ARTICLES) || 30;
+    54→    54→    const maxWords = parseInt(env.MAX_WORDS_PER_ARTICLE) || 1500;
+    55→    55→
+    56→    56→    // 1. Fetch RSS
+    57→    57→    status.step = 'rss_fetch';
+    58→    58→    const feedResult = await fetchAllFeeds(200, env);
+    59→    59→    status.foundInFeeds = feedResult.totalFound;
+    60→    60→    status.sourceStatus = feedResult.sourceStatus;
+    61→    61→    errors.push(...feedResult.errors);
+    62→    62→
+    63→    63→    // 2. Extraire le texte : morss_rss → rss_content → rss_description → bypass → jina upgrade
+    64→    64→    status.step = 'article_extraction';
+    65→    65→    const processed = [];
+    66→    66→
+    67→    67→    for (const article of feedResult.articles) {
+    68→    68→      if (processed.length >= maxArticles) break;
+    69→    69→      const sourceConfig = article._isNewsAPI
+    70→    70→        ? null
+    71→    71→        : findSourceConfig(article.sourceName);
+    72→    72→      const strategy = article.articleStrategy || sourceConfig?.articleStrategy || 'none';
+    73→    73→      let extractedText = '';
+    74→    74→
+    75→    75→      // --- Contenu RSS dispo (fullContent ou description) ---
+    76→    76→      const rssContent = article.fullContent || article.description || '';
+    77→    77→      const cleanRss = rssContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    78→    78→      const rssWords = cleanRss.split(/\s+/).length;
+    79→    79→
+    80→    80→      // Articles avec contenu RSS complet (RSS-only sources)
+    81→    81→      if (strategy === 'none' && rssWords > 20) {
+    82→    82→        extractedText = cleanRss.substring(0, maxWords * 8);
+    83→    83→        article.extractionMethod = article._morssEnriched ? 'morss_rss' : 'rss_content';
+    84→    84→      }
+    85→    85→      // Articles morss-enrichis (Le Monde, Les Échos) : 400-800 mots
+    86→    86→      else if (article._morssEnriched && rssWords > 50) {
+    87→    87→        extractedText = cleanRss.substring(0, maxWords * 8);
+    88→    88→        article.extractionMethod = 'morss_rss';
+    89→    89→        // Marquer pour upgrade Jina si contenu encore court
+    90→    90→        if (rssWords < 300) article._canUpgrade = true;
+    91→    91→      }
+    92→    92→      // Fallback : description RSS courte
+    93→    93→      else if (rssWords > 15) {
+    94→    94→        extractedText = cleanRss;
+    95→    95→        article.extractionMethod = 'rss_description';
+    96→    96→        article._canUpgrade = (strategy === 'jina_auth' || strategy === 'html_fetch');
+    97→    97→      }
+    98→    98→
+    99→    99→      if (!extractedText) continue;
+   100→   100→
+   101→   101→      article.extractedText = extractedText;
+   102→   102→      article.extractedWords = extractedText.split(/\s+/).length;
+   103→   103→      processed.push(article);
+   104→   104→    }
+   105→   105→
+   106→   106→    // --- UPGRADE paywall bypass : enrichir les articles courts des sites paywallés ---
+   107→   107→    status.step = 'paywall_bypass';
+   108→   108→    let bypassCount = 0;
+   109→   109→    const bypassCandidates = processed
+   110→   110→      .filter(a => a.extractedWords < 300 && a.link && isLikelyPaywalled(a.link))
+   111→   111→      .sort((a, b) => a.extractedWords - b.extractedWords)
+   112→   112→      .slice(0, 10); // Max 10 tentatives de bypass
+   113→   113→
+   114→   114→    for (const article of bypassCandidates) {
+   115→   115→      try {
+   116→   116→        const enriched = await enrichArticle(article, env, 300);
+   117→   117→        if (enriched) bypassCount++;
+   118→   118→      } catch (e) {
+   119→   119→        console.log(`Bypass échoué pour ${article.title}: ${e.message}`);
+   120→   120→      }
+   121→   121→    }
+   122→   122→    status.paywallBypass = bypassCount;
+   123→   123→
+   124→   124→    // --- UPGRADE jina : enrichir les articles courts si budget dispo ---
+   125→   125→    status.step = 'jina_upgrade';
+   126→   126→    const jinaBudget = env.JINA_API_KEY ? 10 : 2; // Budget réduit car bypass prioritaire
+   127→   127→    let jinaUsed = 0;
+   128→   128→
+   129→   129→    if (jinaBudget > 0) {
+   130→   130→      const upgradeable = processed
+   131→   131→        .filter(a => a._canUpgrade && a.extractedWords < 300)
+   132→   132→        .sort((a, b) => a.extractedWords - b.extractedWords)
+   133→   133→        .slice(0, jinaBudget);
+   134→   134→
+   135→   135→      for (const article of upgradeable) {
+   136→   136→        if (jinaUsed >= jinaBudget) break;
+   137→   137→        const sourceConfig = findSourceConfig(article.sourceName);
+   138→   138→        try {
+   139→   139→          const result = await fetchFullArticle(article, sourceConfig, env);
+   140→   140→          if (result.success && result.text && result.text.split(/\s+/).length > 100) {
+   141→   141→            article.extractedText = result.text;
+   142→   142→            article.extractionMethod = `morss+${result.method}`;
+   143→   143→            article.extractedWords = result.text.split(/\s+/).length;
+   144→   144→            jinaUsed++;
+   145→   145→          }
+   146→   146→        } catch (e) {
+   147→   147→          console.error(`Upgrade jina echoue pour ${article.title}: ${e.message}`);
+   148→   148→        }
+   149→   149→      }
+   150→   150→    }
+   151→   151→
+   152→   152→    // 3. Stocker dans KV
+   153→   153→    status.step = 'kv_store';
+   154→   154→    await env.CACHE.put(KV_ARTICLES, JSON.stringify({
+   155→   155→      date: eventTime.toISOString(),
+   156→   156→      articles: processed,
+   157→   157→      meta: {
+   158→   158→        total: processed.length,
+   159→   159→        sources: [...new Set(processed.map(a => a.sourceName))],
+   160→   160→        methods: [...new Set(processed.map(a => a.extractionMethod))],
+   161→   161→        errors,
+   162→   162→      },
+   163→   163→    }), { expirationTtl: 7200 });
+   164→   164→
+   165→   165→    status.success = true;
+   166→   166→    status.articlesExtracted = processed.length;
+   167→   167→    status.sourcesUsed = [...new Set(processed.map(a => a.sourceName))];
+   168→   168→    status.extractionMethods = {};
+   169→   169→    for (const a of processed) {
+   170→   170→      const m = a.extractionMethod || 'unknown';
+   171→   171→      status.extractionMethods[m] = (status.extractionMethods[m] || 0) + 1;
+   172→   172→    }
+   173→   173→    status.jinaUsed = jinaUsed;
+   174→   174→    status.jinaBudget = jinaBudget;
+   175→   175→    status.hasJinaKey = !!env.JINA_API_KEY;
+   176→   176→    status.bypassMethods = {};
+   177→   177→    for (const a of processed) {
+   178→   178→      if (a.extractionMethod && a.extractionMethod.startsWith('bypass_')) {
+   179→   179→        const m = a.extractionMethod;
+   180→   180→        status.bypassMethods[m] = (status.bypassMethods[m] || 0) + 1;
+   181→   181→      }
+   182→   182→    }
+   183→   183→
+   184→   184→  } catch (err) {
+   185→   185→    status.success = false;
+   186→   186→    status.error = err.message;
+   187→   187→    errors.push(`Phase FETCH: ${err.message}`);
+   188→   188→  }
+   189→   189→
+   190→   190→  await env.CACHE.put(KV_STATUS, JSON.stringify(status), { expirationTtl: 86400 });
+   191→   191→  await env.CACHE.put(KV_ERRORS, JSON.stringify(errors), { expirationTtl: 86400 });
+   192→   192→  return status;
+   193→   193→}
+   194→   194→
+   195→   195→// ============================================================
+   196→   196→// PHASE 2 — COT-1 : IA Extraction + IA Thématisation
+   197→   197→// ============================================================
+   198→   198→export async function phaseCot1(env, eventTime) {
+   199→   199→  const status = { phase: 'cot1', startedAt: eventTime.toISOString(), step: 'kv_read', stages: {} };
+   200→   200→
+   201→   201→  try {
+   202→   202→    const raw = await env.CACHE.get(KV_ARTICLES);
+   203→   203→    if (!raw) throw new Error('Aucun article en KV. Phase FETCH exécutée ?');
+   204→   204→    const { articles, meta } = JSON.parse(raw);
+   205→   205→    if (!articles.length) throw new Error('0 article extrait.');
+   206→   206→
+   207→   207→    // --- Lire la mémoire éditoriale ---
+   208→   208→    status.step = 'memory_read';
+   209→   209→    let memoryContext = null;
+   210→   210→    try {
+   211→   211→      memoryContext = await getMemoryContext(env, 7);
+   212→   212→      status.memoryLoaded = !!memoryContext;
+   213→   213→      status.memoryLength = memoryContext ? memoryContext.length : 0;
+   214→   214→    } catch (e) {
+   215→   215→      console.log(`Mémoire indisponible: ${e.message}`);
+   216→   216→    }
+   217→   217→    // Stocker le contexte mémoire pour les phases suivantes
+   218→   218→    if (memoryContext) {
+   219→   219→      await env.CACHE.put('pipeline:memory_context', memoryContext, { expirationTtl: 7200 });
+   220→   220→    }
+   221→   221→
+   222→   222→    status.step = 'ai_extract';
+   223→   223→    status.stages.extract = { started: new Date().toISOString() };
+   224→   224→    const extractResult = await stage1_extract(articles, env, memoryContext);
+   225→   225→    status.stages.extract = { ...status.stages.extract, finished: new Date().toISOString(), provider: extractResult.provider, length: extractResult.content.length };
+   226→   226→
+   227→   227→    await env.CACHE.put(KV_EXTRACTION, JSON.stringify({
+   228→   228→      date: eventTime.toISOString(),
+   229→   229→      content: extractResult.content,
+   230→   230→      provider: extractResult.provider,
+   231→   231→      meta,
+   232→   232→    }), { expirationTtl: 7200 });
+   233→   233→
+   234→   234→    status.step = 'delay_10s';
+   235→   235→    await new Promise(r => setTimeout(r, 10000));
+   236→   236→
+   237→   237→    status.step = 'ai_theme';
+   238→   238→    status.stages.theme = { started: new Date().toISOString() };
+   239→   239→    const themeResult = await stage2_theme(extractResult.content, articles, env);
+   240→   240→    status.stages.theme = { ...status.stages.theme, finished: new Date().toISOString(), provider: themeResult.provider, length: themeResult.content.length };
+   241→   241→
+   242→   242→    await env.CACHE.put(KV_THEMES, JSON.stringify({
+   243→   243→      date: eventTime.toISOString(),
+   244→   244→      content: themeResult.content,
+   245→   245→      provider: themeResult.provider,
+   246→   246→    }), { expirationTtl: 7200 });
+   247→   247→
+   248→   248→    status.success = true;
+   249→   249→    status.providers = [extractResult.provider, themeResult.provider];
+   250→   250→
+   251→   251→  } catch (err) {
+   252→   252→    status.success = false;
+   253→   253→    status.error = err.message;
+   254→   254→  }
+   255→   255→
+   256→   256→  await env.CACHE.put(statusKey('cot1'), JSON.stringify(status), { expirationTtl: 86400 });
+   257→   257→  return status;
+   258→   258→}
+   259→   259→
+   260→   260→// ============================================================
+   261→   261→// PHASE 3 — COT-2 : RESEARCH + IA Rédaction + IA Revue critique
+   262→   262→// Intègre la boucle de recherche web (DDG + SearXNG)
+   263→   263→// ============================================================
+   264→   264→export async function phaseCot2(env, eventTime) {
+   265→   265→  const status = { phase: 'cot2', startedAt: eventTime.toISOString(), step: 'kv_read', stages: {} };
+   266→   266→
+   267→   267→  try {
+   268→   268→    const themesRaw = await env.CACHE.get(KV_THEMES);
+   269→   269→    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+   270→   270→    if (!themesRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
+   271→   271→
+   272→   272→    const themesContent = JSON.parse(themesRaw).content;
+   273→   273→    let { articles } = JSON.parse(articlesRaw);
+   274→   274→
+   275→   275→    // Récupérer le contexte mémoire (stocké par COT1)
+   276→   276→    let memoryContext = null;
+   277→   277→    try {
+   278→   278→      memoryContext = await env.CACHE.get('pipeline:memory_context');
+   279→   279→      status.memoryUsed = !!memoryContext;
+   280→   280→    } catch (e) { /* silent */ }
+   281→   281→
+   282→   282→    // === ÉTAPE RECHERCHE : identifier et exécuter les recherches complémentaires ===
+   283→   283→    status.step = 'research';
+   284→   284→    const researchRequests = parseResearchNeeds(themesContent);
+   285→   285→
+   286→   286→    if (researchRequests.length > 0) {
+   287→   287→      console.log(`${researchRequests.length} besoins de recherche identifiés`);
+   288→   288→      const researchArticles = await executeResearchLoop(researchRequests, env);
+   289→   289→      status.research = {
+   290→   290→        requests: researchRequests.length,
+   291→   291→        found: researchArticles.length,
+   292→   292→        details: researchArticles.map(a => ({ title: a.title, sourceName: a.sourceName, words: a.extractedWords })),
+   293→   293→      };
+   294→   294→
+   295→   295→      // Ajouter les articles de recherche au pool
+   296→   296→      if (researchArticles.length > 0) {
+   297→   297→        articles = [...articles, ...researchArticles];
+   298→   298→        // Mettre à jour le KV articles avec le pool enrichi
+   299→   299→        const updatedRaw = JSON.parse(articlesRaw);
+   300→   300→        updatedRaw.articles = articles;
+   301→   301→        await env.CACHE.put(KV_ARTICLES, JSON.stringify(updatedRaw), { expirationTtl: 7200 });
+   302→   302→        await env.CACHE.put(KV_RESEARCH, JSON.stringify(researchArticles), { expirationTtl: 7200 });
+   303→   303→      }
+   304→   304→    } else {
+   305→   305→      status.research = { requests: 0, found: 0, skipped: true };
+   306→   306→    }
+   307→   307→
+   308→   308→    // === ÉTAPE RÉDACTION ===
+   309→   309→    status.step = 'ai_draft';
+   310→   310→    status.stages.draft = { started: new Date().toISOString() };
+   311→   311→    const draftResult = await stage3_draft(themesContent, articles, env, memoryContext);
+   312→   312→    status.stages.draft = { ...status.stages.draft, finished: new Date().toISOString(), provider: draftResult.provider, length: draftResult.content.length };
+   313→   313→
+   314→   314→    await env.CACHE.put(KV_DRAFT, JSON.stringify({
+   315→   315→      date: eventTime.toISOString(),
+   316→   316→      content: draftResult.content,
+   317→   317→      provider: draftResult.provider,
+   318→   318→    }), { expirationTtl: 7200 });
+   319→   319→
+   320→   320→    status.step = 'delay_10s';
+   321→   321→    await new Promise(r => setTimeout(r, 10000));
+   322→   322→
+   323→   323→    status.step = 'ai_review';
+   324→   324→    status.stages.review = { started: new Date().toISOString() };
+   325→   325→    const reviewResult = await stage4_review(draftResult.content, articles, env);
+   326→   326→    status.stages.review = { ...status.stages.review, finished: new Date().toISOString(), provider: reviewResult.provider, length: reviewResult.content.length };
+   327→   327→
+   328→   328→    await env.CACHE.put(KV_REVIEW, JSON.stringify({
+   329→   329→      date: eventTime.toISOString(),
+   330→   330→      content: reviewResult.content,
+   331→   331→      provider: reviewResult.provider,
+   332→   332→    }), { expirationTtl: 7200 });
+   333→   333→
+   334→   334→    status.success = true;
+   335→   335→    status.providers = [draftResult.provider, reviewResult.provider];
+   336→   336→
+   337→   337→  } catch (err) {
+   338→   338→    status.success = false;
+   339→   339→    status.error = err.message;
+   340→   340→  }
+   341→   341→
+   342→   342→  await env.CACHE.put(statusKey('cot2'), JSON.stringify(status), { expirationTtl: 86400 });
+   343→   343→  return status;
+   344→   344→}
+   345→   345→
+   346→   346→// ============================================================
+   347→   347→// PHASE 4 — COT-3 : IA Synthèse EIC
+   348→   348→// ============================================================
+   349→   349→export async function phaseCot3(env, eventTime) {
+   350→   350→  const status = { phase: 'cot3', startedAt: eventTime.toISOString(), step: 'kv_read', stages: {} };
+   351→   351→
+   352→   352→  try {
+   353→   353→    const draftRaw = await env.CACHE.get(KV_DRAFT);
+   354→   354→    const reviewRaw = await env.CACHE.get(KV_REVIEW);
+   355→   355→    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+   356→   356→    if (!draftRaw || !reviewRaw || !articlesRaw) throw new Error('Données manquantes en KV.');
+   357→   357→
+   358→   358→    const draft = JSON.parse(draftRaw).content;
+   359→   359→    const review = JSON.parse(reviewRaw).content;
+   360→   360→    const { articles } = JSON.parse(articlesRaw);
+   361→   361→
+   362→   362→    // Récupérer le contexte mémoire (stocké par COT1)
+   363→   363→    let memoryContext = null;
+   364→   364→    try {
+   365→   365→      memoryContext = await env.CACHE.get('pipeline:memory_context');
+   366→   366→      status.memoryUsed = !!memoryContext;
+   367→   367→    } catch (e) { /* silent */ }
+   368→   368→
+   369→   369→    status.step = 'ai_synthesis';
+   370→   370→    status.stages.synthesis = { started: new Date().toISOString() };
+   371→   371→    const synthesisResult = await stage5_synthesis(draft, review, articles, env, memoryContext);
+   372→   372→    status.stages.synthesis = { ...status.stages.synthesis, finished: new Date().toISOString(), provider: synthesisResult.provider, length: synthesisResult.content.length };
+   373→   373→
+   374→   374→    await env.CACHE.put(KV_REVIEW_FINAL, JSON.stringify({
+   375→   375→      date: eventTime.toISOString(),
+   376→   376→      content: synthesisResult.content,
+   377→   377→      provider: synthesisResult.provider,
+   378→   378→      meta: articlesRaw ? JSON.parse(articlesRaw).meta : {},
+   379→   379→      cotStages: ['extraction', 'theming', 'drafting', 'review', 'synthesis+polish'],
+   380→   380→    }), { expirationTtl: 7200 });
+   381→   381→
+   382→   382→    status.success = true;
+   383→   383→    status.provider = synthesisResult.provider;
+   384→   384→
+   385→   385→    // --- Écriture mémoire : sauvegarder le souvenir du jour ---
+   386→   386→    try {
+   387→   387→      status.step = 'memory_write';
+   388→   388→      const dailyMem = await saveDailyMemory(env, eventTime, synthesisResult.content, articles);
+   389→   389→      await updateSemanticMemory(env, dailyMem);
+   390→   390→      await updateNarratives(env, dailyMem);
+   391→   391→      status.memorySaved = true;
+   392→   392→      status.memoryThemes = dailyMem.themes.length;
+   393→   393→    } catch (memErr) {
+   394→   394→      console.error(`Mémoire échouée: ${memErr.message}`);
+   395→   395→      status.memoryError = memErr.message;
+   396→   396→    }
+   397→   397→
+   398→   398→  } catch (err) {
+   399→   399→    status.success = false;
+   400→   400→    status.error = err.message;
+   401→   401→  }
+   402→   402→
+   403→   403→  await env.CACHE.put(statusKey('cot3'), JSON.stringify(status), { expirationTtl: 86400 });
+   404→   404→  return status;
+   405→   405→}
+   406→   406→
+   407→   407→// ============================================================
+   408→   408→// PHASE 5 — DELIVER : Envoi email
+   409→   409→// ============================================================
+   410→   410→export async function phaseDeliver(env, eventTime) {
+   411→   411→  const status = { phase: 'deliver', startedAt: eventTime.toISOString(), step: 'kv_read' };
+   412→   412→
+   413→   413→  try {
+   414→   414→    const reviewRaw = await env.CACHE.get(KV_REVIEW_FINAL);
+   415→   415→    if (!reviewRaw) throw new Error('Aucune revue finale en KV. Pipeline CoT incomplet ?');
+   416→   416→
+   417→   417→    const review = JSON.parse(reviewRaw);
+   418→   418→    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+   419→   419→    const articles = articlesRaw ? JSON.parse(articlesRaw).articles : [];
+   420→   420→
+   421→   421→    // --- Sauvegarder le résumé du jour pour deep-dive (24h TTL) ---
+   422→   422→    try {
+   423→   423→      await env.CACHE.put('pipeline:day_summary', JSON.stringify({
+   424→   424→        date: eventTime.toISOString(),
+   425→   425→        articles: articles.map(a => ({ title: a.title, sourceName: a.sourceName, link: a.link, category: a.sourceCategory })),
+   426→   426→        publicUrl: env.PUBLIC_URL || null,
+   427→   427→      }), { expirationTtl: 86400 });
+   428→   428→    } catch (e) { console.error(`Sauvegarde day_summary échouée: ${e.message}`); }
+   429→   429→
+   430→   430→    status.step = 'build_email';
+   431→   431→    const date = new Date(eventTime);
+   432→   432→    const subject = buildSubject(date);
+   433→   433→    const publicUrl = env.PUBLIC_URL || null;
+   434→   434→    const htmlContent = buildEmailHTML(review.content, articles, date, publicUrl);
+   435→   435→
+   436→   436→    status.step = 'send_email';
+   437→   437→    const sendResult = await sendEmail(env, subject, htmlContent);
+   438→   438→
+   439→   439→    status.success = true;
+   440→   440→    status.emailId = sendResult.id;
+   441→   441→    status.provider = review.provider;
+   442→   442→    status.cotStages = review.cotStages;
+   443→   443→    status.subject = subject;
+   444→   444→
+   445→   445→    // Nettoyer les KV inter-phases (mais garder day_summary)
+   446→   446→    for (const key of [KV_ARTICLES, KV_EXTRACTION, KV_THEMES, KV_DRAFT, KV_REVIEW, KV_SYNTHESIS, KV_REVIEW_FINAL, KV_RESEARCH, 'pipeline:memory_context']) {
+   447→   447→      await env.CACHE.delete(key);
+   448→   448→    }
+   449→   449→
+   450→   450→    // --- Phase RÊVE : distillation (journalière légère, profonde le vendredi) ---
+   451→   451→    try {
+   452→   452→      status.step = 'dream';
+   453→   453→      const dayOfWeek = eventTime.getDay(); // 0=dim, 5=vendredi
+   454→   454→      const isFriday = dayOfWeek === 5;
+   455→   455→      const dreamResult = await dreamDistill(env, isFriday ? 14 : 7, false);
+   456→   456→      status.dream = dreamResult;
+   457→   457→      if (dreamResult.skipped) {
+   458→   458→        console.log(`Rêve ignoré: ${dreamResult.reason}`);
+   459→   459→      } else {
+   460→   460→        console.log(`Rêve terminé: ${dreamResult.daysAnalyzed} jours, ${dreamResult.dreamDurationMs}ms`);
+   461→   461→      }
+   462→   462→    } catch (dreamErr) {
+   463→   463→      console.error(`Rêve échoué: ${dreamErr.message}`);
+   464→   464→      status.dreamError = dreamErr.message;
+   465→   465→    }
+   466→   466→
+   467→   467→  } catch (err) {
+   468→   468→    status.success = false;
+   469→   469→    status.error = err.message;
+   470→   470→  }
+   471→   471→
+   472→   472→  await env.CACHE.put(statusKey('deliver'), JSON.stringify(status), { expirationTtl: 86400 });
+   473→   473→  return status;
+   474→   474→}
+   475→   475→
+   476→   476→// ============================================================
+   477→   477→// RESEARCH LOOP — Parse et exécute les besoins de recherche
+   478→   478→// ============================================================
+   479→   479→
+   480→   480→/**
+   481→   481→ * Parse les <research_needs> du STAGE2 pour extraire les requêtes
+   482→   482→ * @param {string} themesContent - Sortie XML du STAGE2
+   483→   483→ * @returns {Array<{reason, query, lang, priority}>}
+   484→   484→ */
+   485→   485→function parseResearchNeeds(themesContent) {
+   486→   486→  if (!themesContent) return [];
+   487→   487→
+   488→   488→  const requests = [];
+   489→   489→
+   490→   490→  // Parser <request id="N" priority="...">
+   491→   491→  const requestRegex = /<request\s+id="(\d+)"\s+priority="(\w+)">\s*<reason>([\s\S]*?)<\/reason>\s*<query>([\s\S]*?)<\/query>\s*<lang>([\s\S]*?)<\/lang>\s*<\/request>/gi;
+   492→   492→  let match;
+   493→   493→
+   494→   494→  while ((match = requestRegex.exec(themesContent)) !== null) {
+   495→   495→    const langStr = match[5].trim();
+   496→   496→    let langs = ['fr'];
+   497→   497→    try {
+   498→   498→      const parsed = JSON.parse(langStr.replace(/'/g, '"'));
+   499→   499→      if (Array.isArray(parsed)) langs = parsed;
+   500→   500→    } catch (e) {
+   501→   501→      langs = langStr.split(/[\s,]+/).filter(l => l.length === 2);
+   502→   502→    }
+   503→   503→
+   504→   504→    requests.push({
+   505→   505→      id: parseInt(match[1]),
+   506→   506→      priority: match[2],
+   507→   507→      reason: match[3].trim(),
+   508→   508→      query: match[4].trim(),
+   509→   509→      lang: langs,
+   510→   510→    });
+   511→   511→  }
+   512→   512→
+   513→   513→  return requests;
+   514→   514→}
+   515→   515→
+   516→   516→/**
+   517→   517→ * Exécute la boucle de recherche : DDG → fetch contenu → articles
+   518→   518→ * @param {Array} requests - Besoins de recherche parsés
+   519→   519→ * @param {object} env - Environment CF
+   520→   520→ * @returns {Array} Articles trouvés via recherche
+   521→   521→ */
+   522→   522→async function executeResearchLoop(requests, env) {
+   523→   523→  const allArticles = [];
+   524→   524→  const maxRequests = Math.min(requests.length, 3); // Max 3 requêtes
+   525→   525→  const maxArticlesPerRequest = 3;
+   526→   526→
+   527→   527→  for (const req of requests.slice(0, maxRequests)) {
+   528→   528→    try {
+   529→   529→      console.log(`Recherche: "${req.query}" (lang: ${req.lang.join(',')})`);
+   530→   530→
+   531→   531→      // Recherche multilingue
+   532→   532→      const results = await webSearchMultiLang(req.query, req.lang, maxArticlesPerRequest);
+   533→   533→
+   534→   534→      // Fetcher le contenu des top résultats
+   535→   535→      for (const result of results.slice(0, 2)) { // Top 2 par requête
+   536→   536→        try {
+   537→   537→          const text = await fetchSearchResultContent(result.url, 1500);
+   538→   538→          const words = text.split(/\s+/).length;
+   539→   539→
+   540→   540→          if (words > 100) {
+   541→   541→            allArticles.push({
+   542→   542→              title: result.title,
+   543→   543→              sourceName: result.domain || new URL(result.url).hostname,
+   544→   544→              sourceCategory: 'recherche_web',
+   545→   545→              sourceLang: result.lang || 'fr',
+   546→   546→              link: result.url,
+   547→   547→              extractedText: text,
+   548→   548→              extractedWords: words,
+   549→   549→              extractionMethod: `research_${result.lang || 'fr'}`,
+   550→   550→              _isResearch: true,
+   551→   551→            });
+   552→   552→          }
+   553→   553→        } catch (e) {
+   554→   554→          console.log(`Fetch contenu échoué pour ${result.url}: ${e.message}`);
+   555→   555→        }
+   556→   556→      }
+   557→   557→    } catch (e) {
+   558→   558→      console.log(`Recherche échouée pour "${req.query}": ${e.message}`);
+   559→   559→    }
+   560→   560→  }
+   561→   561→
+   562→   562→  console.log(`Recherche: ${allArticles.length} articles trouvés sur ${maxRequests} requêtes`);
+   563→   563→  return allArticles;
+   564→   564→}
+   565→   565→
+   566→   566→// ============================================================
+   567→   567→// UTILITAIRES
+   568→   568→// ============================================================
+   569→   569→export async function getStatus(env) {
+   570→   570→  const statusRaw = await env.CACHE.get(KV_STATUS);
+   571→   571→  const errorsRaw = await env.CACHE.get(KV_ERRORS);
+   572→   572→
+   573→   573→  const phaseStatuses = {};
+   574→   574→  for (const phase of ['fetch', 'cot1', 'cot2', 'cot3', 'deliver']) {
+   575→   575→    const raw = await env.CACHE.get(statusKey(phase));
+   576→   576→    if (raw) phaseStatuses[phase] = JSON.parse(raw);
+   577→   577→  }
+   578→   578→
+   579→   579→  return {
+   580→   580→    status: statusRaw ? JSON.parse(statusRaw) : null,
+   581→   581→    errors: errorsRaw ? JSON.parse(errorsRaw) : [],
+   582→   582→    cotPhases: phaseStatuses,
+   583→   583→    kvNamespace: !!env.CACHE,
+   584→   584→  };
+   585→   585→}
+   586→   586→
+   587→   587→// ============================================================
+   588→   588→// DEEP-DIVE — Revue approfondie sur un sujet ciblé
+   589→   589→// Pipeline simplifié : fetch → filtre → rédaction → envoi email
+   590→   590→// ============================================================
+   591→   591→export async function runDeepDive(env, topic, refDate) {
+   592→   592→  const status = { phase: 'deep_dive', topic, startedAt: new Date().toISOString(), step: 'init' };
+   593→   593→
+   594→   594→  try {
+   595→   595→    // 1. Re-fetch tous les flux RSS
+   596→   596→    status.step = 'fetch';
+   597→   597→    const feedResult = await fetchAllFeeds(200, env);
+   598→   598→    status.fetchedFromFeeds = feedResult.totalFound;
+   599→   599→
+   600→   600→    // 2. Filtrer les articles pertinents sur le sujet
+   601→   601→    status.step = 'filter';
+   602→   602→    const topicLower = topic.toLowerCase();
+   603→   603→    const topicWords = topicLower.split(/\s+/).filter(w => w.length > 3);
+   604→   604→
+   605→   605→    const relevant = feedResult.articles.filter(a => {
+   606→   606→      const text = `${a.title} ${a.fullContent || ''} ${a.description || ''}`.toLowerCase();
+   607→   607→      // Au moins 2 mots-clés du sujet présents, ou le titre complet
+   608→   608→      const titleMatch = a.title.toLowerCase().includes(topicLower) || topicLower.includes(a.title.toLowerCase());
+   609→   609→      const keywordMatches = topicWords.filter(w => text.includes(w)).length;
+   610→   610→      return titleMatch || keywordMatches >= 2;
+   611→   611→    });
+   612→   612→
+   613→   613→    // Si peu de résultats, élargir le filtre
+   614→   614→    const articles = relevant.length >= 2 ? relevant : feedResult.articles.filter(a => {
+   615→   615→      const text = `${a.title} ${a.fullContent || ''} ${a.description || ''}`.toLowerCase();
+   616→   616→      return topicWords.some(w => text.includes(w));
+   617→   617→    }).slice(0, 15);
+   618→   618→
+   619→   619→    status.filteredArticles = articles.length;
+   620→   620→
+   621→   621→    if (articles.length < 2) {
+   622→   622→      status.step = 'insufficient';
+   623→   623→      status.success = false;
+   624→   624→      status.error = `Insuffisamment d'articles sur "${topic}" (${articles.length} trouvés)`;
+   625→   625→      // Envoyer un email d'information
+   626→   626→      try {
+   627→   627→        const html = `<!DOCTYPE html><html><head><style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px;color:#333;}</style></head><body><h2>Revue approfondie indisponible</h2><p>Le sujet <strong>${topic}</strong> n'a pas suffisamment de sources disponibles actuellement (${articles.length} articles pertinents trouvés).</p><p>Une revue générale sera envoyée à la prochaine échéance programmée.</p></body></html>`;
+   628→   628→        await sendEmail(env, buildDeepDiveSubject(topic), html);
+   629→   629→      } catch (e) { /* silent */ }
+   630→   630→      return status;
+   631→   631→    }
+   632→   632→
+   633→   633→    // Extraire le texte des articles (simplifié - utiliser contenu RSS)
+   634→   634→    status.step = 'extraction';
+   635→   635→    for (const article of articles) {
+   636→   636→      const rssContent = article.fullContent || article.description || '';
+   637→   637→      article.extractedText = rssContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 12000);
+   638→   638→      if (!article.link && article.url) article.link = article.url;
+   639→   639→    }
+   640→   640→
+   641→   641→    // 3. Rédaction éditoriale approfondie
+   642→   642→    status.step = 'editorial';
+   643→   643→    const dateStr = refDate || new Date().toISOString().split('T')[0];
+   644→   644→    const editorial = await stageDeepDive(articles, topic, env, dateStr);
+   645→   645→    status.provider = editorial.provider;
+   646→   646→
+   647→   647→    // 4. Envoi email
+   648→   648→    status.step = 'email';
+   649→   649→    const htmlContent = buildDeepDiveEmailHTML(editorial.content, topic, refDate);
+   650→   650→    const sendResult = await sendEmail(env, buildDeepDiveSubject(topic), htmlContent);
+   651→   651→
+   652→   652→    status.success = true;
+   653→   653→    status.emailId = sendResult.id;
+   654→   654→    status.articlesUsed = articles.length;
+   655→   655→
+   656→   656→  } catch (err) {
+   657→   657→    status.success = false;
+   658→   658→    status.error = err.message;
+   659→   659→    console.error(`Deep-dive échoué pour "${topic}": ${err.message}`);
+   660→   660→  }
+   661→   661→
+   662→   662→  return status;
+   663→   663→}

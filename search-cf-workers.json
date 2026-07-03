@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.reddit.com/r/LocalLLaMA/comments/1uam3iv/giving_a_local_agent_web_access_without_paid",
+    "name": "Giving a local agent web access without paid search/scrape APIs",
+    "snippet": "SearXNG quality depends on enabled upstream engines and rate limits. Paid search APIs can still be better. This has been good enough for my use.\nSearXNG is a self-hostable metasearch engine. I run it in Docker and point the agent at its JSON endpoint. The search call is roughly: GET { ...",
+    "host_name": "www.reddit.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.firecrawl.dev/blog/best-web-search-apis",
+    "name": "Best Web Search APIs for AI Applications in 2026 - Firecrawl",
+    "snippet": "Find the best web search API for your AI project. We compare top web search APIs including Firecrawl, Exa, Tavily, SerpAPI, and more - with ...",
+    "host_name": "www.firecrawl.dev",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://browser-use.com/posts/web-scraping-guide-2026",
+    "name": "The Ultimate Guide to Web Scraping (2026)",
+    "snippet": "Web scraping in 2026 looks nothing like it used to. This guide covers how it works, what's changed, and which tools to use.",
+    "host_name": "browser-use.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/searxng/searxng/discussions/4119",
+    "name": "Is it possible to run on Cloudflare Workers? #4119 - GitHub",
+    "snippet": "No you can't because cloudflare workers are short lived environments. And searxng needs to continuously run for it to work. View full answer ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.cloudflare.com/browser-run/quick-actions/crawl-endpoint",
+    "name": "Crawl web content · Cloudflare Browser Run docs",
+    "snippet": "The /crawl endpoint scrapes content from a starting URL and follows links across the site, up to a configurable depth or page limit.",
+    "host_name": "developers.cloudflare.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.searxng.org/dev/search_api.html",
+    "name": "Search API - SearXNG Documentation (2026.6.30+d115c61a7)",
+    "snippet": "Search API¶. SearXNG supports querying via a simple HTTP API. Two endpoints, / and /search , are supported for both GET and POST methods.",
+    "host_name": "docs.searxng.org",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://brightdata.com/blog/web-data/best-web-scraping-apis",
+    "name": "The 9 Best Web Scraping APIs & Tools in 2026 - Bright Data",
+    "snippet": "A data-driven breakdown of the best web scraping APIs in 2026, ranked by real benchmark results, pricing, and anti-bot performance.",
+    "host_name": "brightdata.com",
+    "rank": 6,
+    "date": "Jun 29, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.newscatcherapi.com/blog-posts/best-web-search-apis",
+    "name": "Best Web Search API Available in 2026 | NewsCatcher",
+    "snippet": "Compare the best web search APIs in 2026 and find the right tool for your use case, budget, and integration needs.",
+    "host_name": "www.newscatcherapi.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.openwebninja.com/blog/best-serp-apis-2026",
+    "name": "Best SERP APIs in 2026: 7 Tested and Compared - OpenWeb Ninja",
+    "snippet": "We compared 7 SERP APIs on pricing, response time, and data depth. Code examples and JSON responses for OpenWeb Ninja, SerpAPI, DataForSEO, ...",
+    "host_name": "www.openwebninja.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.octoparse.com/blog/openclaw-search-provider",
+    "name": "OpenClaw Search Provider [Best Choices for You] - Octoparse",
+    "snippet": "SearXNG is completely free when self-hosted, with unlimited queries at server cost only. Does the OpenClaw web search API work without an API ...",
+    "host_name": "www.octoparse.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

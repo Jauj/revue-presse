@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com/assafelovic/gpt-researcher",
+    "name": "assafelovic/gpt-researcher: An autonomous agent that  - GitHub",
+    "snippet": "GPT Researcher the first open deep research agent designed for both web and local research on any given task. The agent produces detailed, factual, and ...\nGPT Researcher the first open deep research agent designed for both web and local research on any given task. The agent produces detailed, factual, ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.gptr.dev/blog",
+    "name": "Blog | GPT Researcher",
+    "snippet": "GPT Researcher conducts web research based on an auto-generated plan from local documents, as seen in the architecture above.\nGPT Researcher conducts web research based on an auto-generated plan from local documents, as seen in the architecture above. It then retrieves ...",
+    "host_name": "docs.gptr.dev",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://gptr.dev",
+    "name": "GPT Researcher - Autonomous AI Research Agent",
+    "snippet": "GPT Researcher is an open-source autonomous AI research agent that produces deep, multi-source research reports with inline citations.",
+    "host_name": "gptr.dev",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://pypi.org/project/gpt-researcher/0.8.8",
+    "name": "gpt-researcher - PyPI",
+    "snippet": "GPT Researcher is an autonomous agent designed for comprehensive online research on a variety of tasks. The agent can produce detailed, ...",
+    "host_name": "pypi.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/LLMDevs/comments/1jpfa8f/i_built_open_source_deep_research_heres_how_it",
+    "name": "I built Open Source Deep Research - here's how it works : r/LLMDevs",
+    "snippet": "It has 2 modes: Simple: runs the iterative researcher in a single loop without the initial planning step (for faster output on a narrower topic ...\nI built a deep research implementation that allows you to produce 20+ page detailed research reports, compatible with online and locally deployed models.",
+    "host_name": "www.reddit.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

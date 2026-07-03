@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.reddit.com/r/DataHoarder/comments/1q3pfzy/how_is_archiveph_able_to_access_the_underlying",
+    "name": "How is archive.ph able to access the underlying data of a paywalled",
+    "snippet": "When someone puts in a paywalled url and attempts to archive it, how is archive.ph able to extract (some of) the the underlying data?",
+    "host_name": "www.reddit.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=36060891",
+    "name": "Ask HN: How does archive.is bypass paywalls? - Hacker News",
+    "snippet": "They use you, as a proxy. If you (who archives it) have access to the site (either because you paid or have free articles), they can archive it ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=qQ6nn9pSiiY&vl=en-US",
+    "name": "How to bypass paywalls - YouTube",
+    "snippet": "... archive.org * Using the SeleniumBase Python automation framework 0:00 - How to bypass paywalls 1:41 - How to bypass paywalls for web ...",
+    "host_name": "www.youtube.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/100090383762864/posts/paywall-bypass-you-can-use-an-archive-service-like-archiveio-to-read-the-article/330933793262744",
+    "name": "Paywall bypass! You can use an archive service like Archive.io to",
+    "snippet": "Paywall bypass! You can use an archive service like Archive.io to read the articles which are usually hidden by a paywall.",
+    "host_name": "www.facebook.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.bogleheads.org/forum/viewtopic.php?t=415772",
+    "name": "Alternative to archive.ph? - Bogleheads.org",
+    "snippet": "Anyone know of an alternative archiving website? I think this one is in the Philippines but I imagine there are others.",
+    "host_name": "www.bogleheads.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/dhrm1k/ArchiveJump",
+    "name": "dhrm1k/ArchiveJump - GitHub",
+    "snippet": "Single click redirect to archive.ph to avoid the hassle to open a new tab and then paste the link article to avoid paywalls. - dhrm1k/ArchiveJump.",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=QK7IVpvGai4",
+    "name": "How To Access ANY Paywalled Article For Free in 2025  - YouTube",
+    "snippet": "Learn how to get past paywalls with our guide! From simple browser tricks to advanced techniques, we've got you covered.",
+    "host_name": "www.youtube.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@aimichael/comprehensive-readers-guide-techniques-for-bypassing-digital-paywalls-9bf3fd4805be",
+    "name": "Techniques for Bypassing Digital Paywalls | by Michael Ryaboy",
+    "snippet": "This guide aims to equip people without the ability to pay for subscriptions with the necessary knowledge and techniques to navigate and bypass soft paywalls.",
+    "host_name": "medium.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://allaboutcookies.org/how-to-bypass-paywalls",
+    "name": "12 Legit Ways to Remove Paywall Blocks and Bypass Paywalls",
+    "snippet": "You can bypass certain soft paywalls by switching to reader mode in your browser. We confirmed this by accessing a New York Times article.",
+    "host_name": "allaboutcookies.org",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.archivebuttons.com",
+    "name": "Archive Buttons | Free Paywall Remover",
+    "snippet": "All of the paywall removers in one place. Simply enter the URL of the article and click the archive buttons to remove any paywall. Enter Article URL.",
+    "host_name": "www.archivebuttons.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

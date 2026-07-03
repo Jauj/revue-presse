@@ -1,0 +1,13 @@
+=== PIPELINE TEST Wed Jul  1 19:49:11 UTC 2026 ===
+--- fetch --- 19:49:11
+  success=True
+--- cot1 --- 19:50:12
+  success=True
+  extract: mistral 21781c
+  theme: mistral 12796c
+--- cot2 --- 19:53:42
+  success=True
+  research: 3/3 found, skipped=False
+  draft: mistral 18195c
+  review: mistral 14859c
+--- cot3 --- 19:57:25

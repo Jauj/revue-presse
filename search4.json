@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.youtube.com/watch?v=QK7IVpvGai4",
+    "name": "How To Access ANY Paywalled Article For Free in 2025  - YouTube",
+    "snippet": "... Bypass paywalls with NordVPN and get 74% off plus 3 months FREE by ... Paywall? 01:22 Soft Paywalls 02:28 Clear Cookies 02:44 Ad ...",
+    "host_name": "www.youtube.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/chrome/comments/1ftohd5/need_recommendations_for_paywall_bypass",
+    "name": "Need recommendations for paywall bypass extensions  - Reddit",
+    "snippet": "Bypass Paywall Clean was recently removed from both Chrome and Firefox stores, and I'm desperately looking for alternatives.",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/vercel/next.js/discussions/16665",
+    "name": "Allow googlebot through a paywall on a page using Incremental",
+    "snippet": "Make sure Google can crawl and index your pages and here Verifying Googlebot are the recommended ways of allowing Googlebot to index the paywalled content of a ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=1O8iGOr8fsU",
+    "name": "How to Bypass A Paywall 2025 - Updated! - YouTube",
+    "snippet": "I will be installing BPC and testing on sites to bypass paywalls. Updated for 2025! Programs, Utilities, and Add-on Tutorials: ...",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@aimichael/comprehensive-readers-guide-techniques-for-bypassing-digital-paywalls-9bf3fd4805be",
+    "name": "Techniques for Bypassing Digital Paywalls | by Michael Ryaboy",
+    "snippet": "This guide aims to equip people without the ability to pay for subscriptions with the necessary knowledge and techniques to navigate and bypass soft paywalls.",
+    "host_name": "medium.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://stape.io/news/third-party-cookie-will-be-blocked-in-chrome-versions-as-part-of-privacy-sandbox",
+    "name": "Chrome and Third-Party Cookie Changes - Stape",
+    "snippet": "With server-side tracking, you can bypass the need for third-party cookies and client-side JavaScript libraries, which can slow down your site. Cookies are ...",
+    "host_name": "stape.io",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.traficxo.com/blog/how-to-bypass-paywall",
+    "name": "How to Bypass a Paywall: 10 Proven Methods for 2026 - Traficxo",
+    "snippet": "10 Effective Ways to Bypass Paywalls in 2026 · 1. The \"Wayback Machine\" & Archive Services · 2. Browser \"Reader Mode\" (The Quickest Fix) · 3.",
+    "host_name": "www.traficxo.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://law.stackexchange.com/questions/42030/bypassing-websites-paywall-by-modifying-http-request-headers",
+    "name": "Bypassing website's paywall by modifying HTTP request headers",
+    "snippet": "There's some browser extensions that clears the browser cookies and modify the request referrer before user send out a HTTP request. By this way ...",
+    "host_name": "law.stackexchange.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://portswigger.net/research/cookie-chaos-how-to-bypass-host-and-secure-cookie-prefixes",
+    "name": "Cookie Chaos: How to bypass __Host and __Secure",
+    "snippet": "By using UTF-8 encoding, an attacker can disguise a restricted cookie - such as one that starts with __Host- in a way that bypasses browser ...",
+    "host_name": "portswigger.net",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=11039537",
+    "name": "The google trick no longer works for paywall bypass. Its not just me",
+    "snippet": "A number of sites' paywalls can be bypassed by modifying your referrer, with an extension like Referer Control [0] for example.",
+    "host_name": "news.ycombinator.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

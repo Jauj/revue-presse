@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://morss.it",
+    "name": "morss.it – Get more out of RSS feeds, for free",
+    "snippet": "Get more out of RSS feeds, for free. Turn truncated RSS feeds into full-text feeds. Turn any web page into a RSS feed.",
+    "host_name": "morss.it",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/rss/comments/kh4nlb/list_of_rss_fulltextextraction_wrappers",
+    "name": "List of RSS full-text-extraction wrappers? - Reddit",
+    "snippet": "Tercury parser is probably the best one of them, you can self-host it and use together with tt-rss. Some app, extensions use it too.",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/pictuga/morss",
+    "name": "pictuga/morss: Get full text RSS feeds - GitHub",
+    "snippet": "This tool's goal is to get full-text RSS feeds out of striped RSS feeds, commonly available on internet.",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.newsblur.com/alternative/open-source-rss-reader",
+    "name": "Best Open Source RSS Readers - NewsBlur",
+    "snippet": "Compare the best open source RSS readers: NewsBlur, FreshRSS, Miniflux, and Tiny Tiny RSS. See features, hosting options, mobile apps, and licenses side by ...",
+    "host_name": "www.newsblur.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://selfh.st/alternatives/rss-readers",
+    "name": "Self-Hosting Guide to Alternatives: Feedly, Inoreader",
+    "snippet": "Tiny Tiny RSS is another full-fledged replacement for hosted RSS aggregators most akin to FreshRSS in terms of features, functionality, and ...",
+    "host_name": "selfh.st",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://unstract.com/blog/open-source-document-data-extraction-with-unstract-deepseek",
+    "name": "Open-Source Unstructured Data ETL 2026: Unstract + Ollama +",
+    "snippet": "Unstract is an open-source document processing tool designed to extract structured data from unstructured documents such as PDFs, images, and scanned files.",
+    "host_name": "unstract.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://dev.to/babarot/i-built-a-self-hosted-rss-reader-with-ai-summarization-translation-and-an-mcp-server-316c",
+    "name": "I built an article ingestion pipeline disguised as an RSS reader",
+    "snippet": "Full-text extraction is the core of this app, and I wanted to use Mozilla's battle-tested original. That said, Readability.js has structural ...",
+    "host_name": "dev.to",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.context.dev/blog/top-10-web-scraping-apis-for-ai",
+    "name": "Top 10 Web Scraping APIs for AI in 2026",
+    "snippet": "A comprehensive comparison of the best web scraping APIs for AI agents, LLMs, and RAG pipelines. We rank the top 10 tools based on features, ...",
+    "host_name": "www.context.dev",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.readless.app/solutions/rss-feed-ai-digest",
+    "name": "RSS Feed AI Digest Summary Tool: 2026 Comparison & Setup Guide",
+    "snippet": "Open-source RSSbrew is free if you self-host, but you pay for OpenAI-compatible API tokens (typically $5–15/month) plus your own server costs ...",
+    "host_name": "www.readless.app",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://lukesingham.com/rss-feed-reader",
+    "name": "The Best Self-Hosted RSS Feed Readers - Luke Singham",
+    "snippet": "There's a bunch of open source Feed Readers listed on the Feed Reader section of Awesome Self-Hosted. My criteria to filter the list were:",
+    "host_name": "lukesingham.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

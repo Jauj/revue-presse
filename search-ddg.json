@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://duckduckgo.com",
+    "name": "DuckDuckGo - Protection. Privacy. Peace of mind.",
+    "snippet": "The Internet privacy company that empowers you to seamlessly take control of your personal information online, without any tradeoffs.",
+    "host_name": "duckduckgo.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/luminati-io/duckduckgo-api",
+    "name": "luminati-io/duckduckgo-api: Scrape DuckDuckGo search  - GitHub",
+    "snippet": "The Free DuckDuckGo SERP Scraper offers a straightforward method for collecting search result data on a smaller scale. It's perfect if you need limited data ...\nThe DuckDuckGo SERP API is part of Bright Data's comprehensive SERP Scraper API suite. deliver real-time DuckDuckGo search results with a single API call.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://serpapi.com/duckduckgo-search-api",
+    "name": "DuckDuckGo Search Engine Results API - SerpApi",
+    "snippet": "Scrape DuckDuckGo search results in JSON format automatically, using custom parameters. Search for keywords by region, date, and more with SerpApi.",
+    "host_name": "serpapi.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=d-PIO6aqFSo",
+    "name": "Scrape DuckDuckGo search result using Python - YouTube",
+    "snippet": "Learn how to scrape organic results, related answers, and search assist answers from DuckDuckGo search results using a simple API by SerpApi ...",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.scrapingbee.com/scrapers/duckduckgo-search-api",
+    "name": "DuckDuckGo Search Scraper API - Simple Signup Free Credits",
+    "snippet": "Access DuckDuckGo search data with our API. Retrieve search results, trends, and insights effortlessly. Start your data collection with a single API call.",
+    "host_name": "www.scrapingbee.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@sethsubr/fetch-duckduckgo-web-search-results-in-20-lines-of-java-code-3a34ea9da085",
+    "name": "Fetch DuckDuckGo Web Search Results in 20 lines of Java code",
+    "snippet": "Fetch DuckDuckGo Web Search Results in 20 lines of Java code DuckDuckGo API is a fast and light-weight option to fetch web search results.",
+    "host_name": "medium.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://pypi.org/project/duckduckgo-search",
+    "name": "duckduckgo-search - PyPI",
+    "snippet": "Search for words, documents, images, news, maps and text translation using the DuckDuckGo.com search engine.",
+    "host_name": "pypi.org",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://haystack.deepset.ai/integrations/duckduckgo-api-websearch",
+    "name": "DuckDuckGo | Haystack",
+    "snippet": "The DuckduckgoApiWebSearch class allows you to perform web searches using the DuckDuckGo search engine. Here's how to use it: Import and initialize the ...",
+    "host_name": "haystack.deepset.ai",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

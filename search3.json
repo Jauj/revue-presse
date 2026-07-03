@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://parallel.ai/articles/article-extraction-api-a-developers-guide-to-structured-web-data",
+    "name": "Article Extraction API Guide: Best Tools for Structured Web Data",
+    "snippet": "Learn how article extraction APIs turn web pages into structured, AI-ready data. Compare tools, pricing, formats, and best practices.",
+    "host_name": "parallel.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@codewithnazam/unlocking-content-with-ease-the-top-article-extractor-apis-of-2024-adfca5909f63",
+    "name": "Unlocking Content with Ease: The Top Article Extractor APIs of 2024",
+    "snippet": "It's a blend of technology and ingenuity. At their core, these APIs use web scraping techniques to navigate and extract content from websites.",
+    "host_name": "medium.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nature.com/articles/s41598-025-85715-7",
+    "name": "A scientific-article key-insight extraction system based on multi-actor",
+    "snippet": "We propose a multi-actor LLM approach, merging the strengths of multiple fine-tuned LLMs to improve overall key-insight extraction performance.",
+    "host_name": "www.nature.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/CatchTheTornado/text-extract-api",
+    "name": "CatchTheTornado/text-extract-api - GitHub",
+    "snippet": "Convert any image, PDF or Office document to Markdown text or JSON structured document with super-high accuracy, including tabular data, numbers or math ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8361807",
+    "name": "Data extraction methods for systematic review (semi)automation - PMC",
+    "snippet": "Full text screening and data extraction are conducted using a mix of open-source and commercial tools. This living review update includes publications up to ...",
+    "host_name": "pmc.ncbi.nlm.nih.gov",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mdpi.com/1999-5903/17/5/195",
+    "name": "An Improved Reference Paper Collection System Using Web  - MDPI",
+    "snippet": "In this paper, we present an improved reference paper collection system with three enhancements to solve them: (1) integrating the APIs from multiple paper ...",
+    "host_name": "www.mdpi.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=40028183",
+    "name": "Ask HN: Simple API to extract web article text? - Hacker News",
+    "snippet": "I'm working on a consumer facing project that involves analyzing text from web articles. Does anyone know of an API that can handle the text ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=fTtc4QWMYzE",
+    "name": "Scraping Full-Text Research Articles via Publisher APIs and Python",
+    "snippet": "... fulltext-article-downloader package * Obtaining API keys from various publishers * Downloading PDFs from DOIs via command line and Python ...",
+    "host_name": "www.youtube.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://apify.com/lukaskrivka/article-extractor-smart",
+    "name": "Smart Article Extractor - Apify",
+    "snippet": "Smart Article Extractor extracts articles from any scientific, academic, or news website with one click. Automatically recognizes articles.",
+    "host_name": "apify.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.zyte.com/blog/news-article-data-extraction-open-source-vs-closed-source-solutions",
+    "name": "News & article data extraction: Open source vs closed source - Zyte",
+    "snippet": "We help you find an article data extraction tool that is best suited to meet your needs and provides the functionality and data quality that ...",
+    "host_name": "www.zyte.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

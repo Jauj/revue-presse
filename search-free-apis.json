@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.firecrawl.dev/blog/best-web-search-apis",
+    "name": "Best Web Search APIs for AI Applications in 2026 - Firecrawl",
+    "snippet": "Find the best web search API for your AI project. We compare top web search APIs including Firecrawl, Exa, Tavily, SerpAPI, and more - with ...",
+    "host_name": "www.firecrawl.dev",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://serpapi.com/blog/web-search-api",
+    "name": "Web Search API Alternatives - SerpApi",
+    "snippet": "Google's Custom Search JSON API provides search results from a Google Programmable Search Engine in a JSON format. They offer 100 search queries ...\nthe only option Google provides for searching the web programmatically is the Custom Search API. They offer 100 search queries per day for free ...",
+    "host_name": "serpapi.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://scrapfly.io/blog/posts/google-serp-api-and-alternatives",
+    "name": "Best SERP APIs in 2026: Official Google Alternatives & Third-Party",
+    "snippet": "SerpApi is the most established third-party SERP API provider, offering access to 80+ search engines including Google, Bing, Baidu, and Yandex.\nThis article will guide you through the reality of an official Google SERP API and explore alternative solutions.\nScrapfly is a universal web scraping platform that can scrape any website, including Google SERPs, using automatic AI-powered extraction models.",
+    "host_name": "scrapfly.io",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/googlecloud/comments/1qp4mlz/google_custom_search_api_is_closing_need",
+    "name": "Google Custom Search API is closing. Need affordable Open Web",
+    "snippet": "Google Custom Search API is closing. Need affordable Open Web Search alternative for 60k req/month · Current Tool: Google Custom Search JSON API ...",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://brave.com/search/api",
+    "name": "Brave Search API",
+    "snippet": "The Brave Search API is a developer tool for building applications with data from the Web. It's powered by Brave's independent Web index.",
+    "host_name": "brave.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://scrapegraphai.com/blog/bing-search-api-alternatives",
+    "name": "Bing Search API Alternatives: 7 Best Replacements in 2026",
+    "snippet": "Bing Search API was retired in August 2025. Here are the 7 best alternatives for AI agents, RAG pipelines, and web data extraction.",
+    "host_name": "scrapegraphai.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://brightdata.com/blog/web-data/best-serp-apis",
+    "name": "The 16 Best SERP and Web Search APIs of 2026 - Bright Data",
+    "snippet": "Scrapingdog provides a dedicated Google SERP API focused on speed and low cost at scale. It extracts organic results, ads, snippets, local packs, and AI ...\nCompare the 16 best SERP and web search APIs of 2026 on pricing, features, search engines, and AI integration to find the right tool for your needs.",
+    "host_name": "brightdata.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://serpapi.com/blog/serpapi-alternatives-best-web-search-apis",
+    "name": "SerpApi Alternatives: Best Web Search APIs in 2026",
+    "snippet": "Brave Search API. Brave Search API gives you access to Brave's own search index, not Google or Bing results. Pros. Uses Brave's independent ...",
+    "host_name": "serpapi.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://getairefs.com/blog/best-serp-apis",
+    "name": "Best Google Search APIs in 2026 (Since Google Won't Give You One)",
+    "snippet": "Serper is the most popular choice for developers who want fast, cheap Google results without a full SEO platform's overhead. Response times ...",
+    "host_name": "getairefs.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.quora.com/Are-there-any-free-search-engine-APIs",
+    "name": "Are there any free search engine APIs? - Quora",
+    "snippet": "I recommend Zenserp. Zenserp is one of the best search engine APIs as it supports Google Search, Youtube Search, Trends Search, Bing Search, ...",
+    "host_name": "www.quora.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

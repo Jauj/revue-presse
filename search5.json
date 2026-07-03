@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.fivefilters.org/full-text-rss",
+    "name": "Full-Text RSS - FiveFilters.org",
+    "snippet": "Extract article content from web articles and partial feeds. Get results in XML or JSON. Use our hosted web service or download the software to run on your own ...",
+    "host_name": "www.fivefilters.org",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/rss/comments/yc63jl/any_recommendation_of_rss_service_that_has_full",
+    "name": "Any recommendation of RSS service that has full text extraction?",
+    "snippet": "fivefilters has a free full-text RSS service: It seems to work fairly well for that feed. https://morss.it/\nI'll try to get a full text rss based on this link: https://rss.golem.de/rss.php?feed=RSS2.0 The only service that gets the job done is fivefilters.org.",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://morss.it",
+    "name": "morss.it – Get more out of RSS feeds, for free",
+    "snippet": "Get more out of RSS feeds, for free. Turn truncated RSS feeds into full-text feeds. Turn any web page into a RSS feed.",
+    "host_name": "morss.it",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.fivefilters.org/2021/full-text-rss-397",
+    "name": "Full-Text RSS 3.9.7 - FiveFilters.org",
+    "snippet": "Full-Text RSS is used by software developers and news enthusiasts to extract article content from news sites and blogs, and to convert RSS feeds",
+    "host_name": "www.fivefilters.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Coool/full-text-rss-fivefilters",
+    "name": "Full-Text RSS - GitHub",
+    "snippet": "Full-Text RSS from FiveFilters.org is used by software developers and news enthusiasts to extract article content from news sites and blogs.",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.fivefilters.org/2020/full-text-rss-396",
+    "name": "Full-Text RSS 3.9.6: PHP 7.4 compatible - FiveFilters.org",
+    "snippet": "Full-Text RSS is used by software developers and news enthusiasts to extract article content from news sites and blogs, and to convert RSS feeds\nFull-Text RSS version 3.9.6 is now available. Full-Text RSS is used by software developers and news enthusiasts to extract article content from news sites and ...",
+    "host_name": "www.fivefilters.org",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://grokipedia.com/page/Full-Text_RSS",
+    "name": "Full-Text RSS - Grokipedia",
+    "snippet": "Full-Text RSS is a free and open-source web-based service developed by FiveFilters.org that extracts full article content from web pages linked in summary-only ...",
+    "host_name": "grokipedia.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.lessannoyingcrm.com/blog/easier-full-text-rss-feeds-with-fivefilters-org",
+    "name": "Easier full text RSS feeds with FiveFilters.org | LACRM Blog",
+    "snippet": "Last week I talked about how to use Unsum.com to convert partial RSS feeds into full text feeds. While the Unsum method is very general and ...",
+    "host_name": "www.lessannoyingcrm.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.fivefilters.org/2014/full-text-rss-mashape",
+    "name": "New version of Full-Text RSS on Mashape - FiveFilters.org",
+    "snippet": "We're getting ready to release the new version of Full-Text RSS, our tool to extract article content from web pages and transform partial ...",
+    "host_name": "www.fivefilters.org",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com/item?id=26016686",
+    "name": "I've mentioned this on HN before, one pattern I've noticed is a lot of",
+    "snippet": "Basically, for feeds where I have \"full text\" enabled, it fetches the article page with mozilla's \"reader mode\" implementation and extracts the full text.",
+    "host_name": "news.ycombinator.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

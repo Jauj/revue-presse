@@ -1,0 +1,887 @@
+     1→// ============================================================
+     2→// memory.js — Système de mémoire éditoriale avec distillation
+     3→// 5 couches :
+     4→//   1. Épisodique   : souvenir quotidien (TTL 30j)
+     5→//   2. Sémantique   : thèmes récurrents avec poids (TTL 365j)
+     6→//   3. Narratives   : fil rouge inter-jours, récits en cours (TTL 90j)
+     7→//   4. Distillée    : connaissances consolidées par IA (TTL 365j)
+     8→//   5. Éditoriale   : préférences apprises (TTL 365j)
+     9→//
+    10→// Processus de "rêve" (distillation) :
+    11→//   - Journalier (léger) : mise à jour narratives
+    12→//   - Hebdomadaire (vendredi, profond) : consolidation IA mensuelle
+    13→//   - Manuel : via /trigger/dream
+    14→//
+    15→// Inspiré de : forge-agent-memory, RecMem, claude-second-brain,
+    16→//              opendream, anchor-memory
+    17→// Stockage : KV Cloudflare (gratuit, <1000 writes/jour)
+    18→// ============================================================
+    19→
+    20→import { callAI } from './ai.js';
+    21→
+    22→// === Clés KV ===
+    23→const MEM_PREFIX = 'memory:';
+    24→
+    25→// ============================================================
+    26→// COUCHE 1 — MÉMOIRE ÉPISODIQUE (un souvenir par jour)
+    27→// KV: memory:day:2026-07-01  (TTL 30j)
+    28→// ============================================================
+    29→
+    30→export async function saveDailyMemory(env, date, reviewContent, articles) {
+    31→  const dateStr = date.toISOString().split('T')[0];
+    32→  const key = `${MEM_PREFIX}day:${dateStr}`;
+    33→
+    34→  const themes = extractThemesFromReview(reviewContent);
+    35→  const sources = [...new Set(articles.map(a => a.sourceName))];
+    36→  const keyFacts = extractKeyFacts(reviewContent);
+    37→  const actors = extractActors(reviewContent);
+    38→
+    39→  const memory = {
+    40→    date: dateStr,
+    41→    themes,
+    42→    sources,
+    43→    keyFacts,
+    44→    actors,
+    45→    articleCount: articles.length,
+    46→    sourceCount: sources.length,
+    47→    wordEstimate: reviewContent.split(/\s+/).length,
+    48→    createdAt: new Date().toISOString(),
+    49→  };
+    50→
+    51→  await env.CACHE.put(key, JSON.stringify(memory), { expirationTtl: 30 * 24 * 3600 });
+    52→  return memory;
+    53→}
+    54→
+    55→// ============================================================
+    56→// COUCHE 2 — MÉMOIRE SÉMANTIQUE (thèmes récurrents)
+    57→// KV: memory:themes  (TTL 365j)
+    58→// ============================================================
+    59→
+    60→export async function updateSemanticMemory(env, dailyMemory) {
+    61→  const key = `${MEM_PREFIX}themes`;
+    62→  const raw = await env.CACHE.get(key);
+    63→  let semantic = raw ? JSON.parse(raw) : { themes: {}, lastUpdated: null, totalDays: 0 };
+    64→
+    65→  for (const theme of dailyMemory.themes) {
+    66→    const normalized = normalizeTheme(theme);
+    67→    if (!semantic.themes[normalized]) {
+    68→      semantic.themes[normalized] = {
+    69→        name: theme,
+    70→        count: 0,
+    71→        firstSeen: dailyMemory.date,
+    72→        lastSeen: dailyMemory.date,
+    73→        relatedSources: [],
+    74→        relatedFacts: [],
+    75→        days: [],
+    76→      };
+    77→    }
+    78→    semantic.themes[normalized].count++;
+    79→    semantic.themes[normalized].lastSeen = dailyMemory.date;
+    80→    if (!semantic.themes[normalized].days.includes(dailyMemory.date)) {
+    81→      semantic.themes[normalized].days.push(dailyMemory.date);
+    82→    }
+    83→
+    84→    const existing = new Set(semantic.themes[normalized].relatedSources);
+    85→    for (const s of dailyMemory.sources) existing.add(s);
+    86→    semantic.themes[normalized].relatedSources = [...existing].slice(0, 10);
+    87→
+    88→    for (const fact of dailyMemory.keyFacts.slice(0, 2)) {
+    89→      if (!semantic.themes[normalized].relatedFacts.includes(fact)) {
+    90→        semantic.themes[normalized].relatedFacts.push(fact);
+    91→      }
+    92→    }
+    93→    semantic.themes[normalized].relatedFacts =
+    94→      semantic.themes[normalized].relatedFacts.slice(-5);
+    95→  }
+    96→
+    97→  semantic.totalDays++;
+    98→  semantic.lastUpdated = new Date().toISOString();
+    99→
+   100→  await env.CACHE.put(key, JSON.stringify(semantic), { expirationTtl: 365 * 24 * 3600 });
+   101→  return semantic;
+   102→}
+   103→
+   104→// ============================================================
+   105→// COUCHE 3 — NARRATIVES (fil rouge inter-jours)
+   106→// KV: memory:narratives  (TTL 90j)
+   107→// Détecte les récits qui traversent plusieurs jours
+   108→// ============================================================
+   109→
+   110→export async function updateNarratives(env, dailyMemory) {
+   111→  const key = `${MEM_PREFIX}narratives`;
+   112→  const raw = await env.CACHE.get(key);
+   113→  let narratives = raw ? JSON.parse(raw) : { active: [], archived: [], lastUpdated: null };
+   114→
+   115→  const todayThemes = dailyMemory.themes.map(t => t.toLowerCase());
+   116→  let touchedNarratives = [];
+   117→
+   118→  // 1. Essayer de rattacher les thèmes du jour à des narratives existantes
+   119→  for (const narrative of narratives.active) {
+   120→    let matched = false;
+   121→    for (const theme of todayThemes) {
+   122→      const similarity = computeThemeSimilarity(theme, narrative.title.toLowerCase());
+   123→      if (similarity > 0.4) {
+   124→        // Mettre à jour la narrative
+   125→        narrative.lastSeen = dailyMemory.date;
+   126→        narrative.dayCount = (narrative.dayCount || 1) + 1;
+   127→        narrative.days = narrative.days || [];
+   128→        if (!narrative.days.includes(dailyMemory.date)) {
+   129→          narrative.days.push(dailyMemory.date);
+   130→        }
+   131→        // Ajouter les nouveaux faits
+   132→        for (const fact of dailyMemory.keyFacts.slice(0, 2)) {
+   133→          if (!narrative.facts.some(f => f.fact === fact)) {
+   134→            narrative.facts.push({ fact, date: dailyMemory.date });
+   135→          }
+   136→        }
+   137→        // Ajouter les sources
+   138→        const existingSources = new Set(narrative.sources || []);
+   139→        for (const s of dailyMemory.sources) existingSources.add(s);
+   140→        narrative.sources = [...existingSources];
+   141→        // Dernière évolution
+   142→        narrative.lastEvolution = dailyMemory.themes[0] || '';
+   143→        matched = true;
+   144→        touchedNarratives.push(narrative.id);
+   145→        break;
+   146→      }
+   147→    }
+   148→  }
+   149→
+   150→  // 2. Créer de nouvelles narratives pour les thèmes non rattachés
+   151→  for (const theme of dailyMemory.themes.slice(0, 3)) {
+   152→    const themeLower = theme.toLowerCase();
+   153→    const alreadyTracked = touchedNarratives.some(id => {
+   154→      const n = narratives.active.find(a => a.id === id);
+   155→      return n && computeThemeSimilarity(themeLower, n.title.toLowerCase()) > 0.5;
+   156→    });
+   157→    if (!alreadyTracked) {
+   158→      narratives.active.push({
+   159→        id: `nar_${dailyMemory.date}_${normalizeTheme(theme).substring(0, 20)}`,
+   160→        title: theme,
+   161→        firstSeen: dailyMemory.date,
+   162→        lastSeen: dailyMemory.date,
+   163→        dayCount: 1,
+   164→        days: [dailyMemory.date],
+   165→        facts: dailyMemory.keyFacts.slice(0, 2).map(f => ({ fact: f, date: dailyMemory.date })),
+   166→        sources: dailyMemory.sources.slice(0, 5),
+   167→        lastEvolution: theme,
+   168→        status: 'active',
+   169→      });
+   170→    }
+   171→  }
+   172→
+   173→  // 3. Archiver les narratives inactives (>7 jours sans update)
+   174→  narratives.active = narratives.active.filter(n => {
+   175→    const daysSince = daysBetween(n.lastSeen, dailyMemory.date);
+   176→    if (daysSince > 7 && n.dayCount < 3) return false; // supprimer les éphémères
+   177→    if (daysSince > 14) {
+   178→      n.status = 'archived';
+   179→      n.archivedAt = dailyMemory.date;
+   180→      narratives.archived = narratives.archived || [];
+   181→      narratives.archived.push(n);
+   182→      return false;
+   183→    }
+   184→    return true;
+   185→  });
+   186→
+   187→  // Garder max 10 narratives actives (les plus récentes)
+   188→  narratives.active.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+   189→  narratives.active = narratives.active.slice(0, 10);
+   190→
+   191→  // Garder max 20 narratives archivées
+   192→  if (narratives.archived) {
+   193→    narratives.archived = narratives.archived.slice(-20);
+   194→  }
+   195→
+   196→  narratives.lastUpdated = new Date().toISOString();
+   197→
+   198→  await env.CACHE.put(key, JSON.stringify(narratives), { expirationTtl: 90 * 24 * 3600 });
+   199→  return narratives;
+   200→}
+   201→
+   202→// ============================================================
+   203→// COUCHE 4 — MÉMOIRE DISTILLÉE (connaissances consolidées par IA)
+   204→// KV: memory:distilled:2026-07  (TTL 365j)
+   205→// "Le rêve" : l'IA analyse N jours de mémoires et produit
+   206→// un résumé compact de connaissances de haut niveau
+   207→// ============================================================
+   208→
+   209→/**
+   210→ * Processus de rêve complet (distillation IA)
+   211→ * Lit les mémoires des derniers N jours et produit des insights
+   212→ */
+   213→export async function dreamDistill(env, daysBack = 14, force = false) {
+   214→  const today = new Date();
+   215→  const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+   216→  const distilledKey = `${MEM_PREFIX}distilled:${monthKey}`;
+   217→
+   218→  // Vérifier si on a déjà distillé récemment (pas plus d'une fois par 3 jours)
+   219→  if (!force) {
+   220→    const lastDreamRaw = await env.CACHE.get(`${MEM_PREFIX}last_dream`);
+   221→    if (lastDreamRaw) {
+   222→      const lastDream = JSON.parse(lastDreamRaw);
+   223→      const daysSinceDream = daysBetween(lastDream.date, today.toISOString().split('T')[0]);
+   224→      if (daysSinceDream < 3) {
+   225→        return { skipped: true, reason: `Dernier rêve il y a ${daysSinceDream}j (min 3)`, lastDream };
+   226→      }
+   227→    }
+   228→  }
+   229→
+   230→  // 1. Collecter les mémoires épisodiques
+   231→  const dailyMemories = [];
+   232→  for (let i = 1; i <= daysBack; i++) {
+   233→    const d = new Date(today);
+   234→    d.setDate(d.getDate() - i);
+   235→    const dateStr = d.toISOString().split('T')[0];
+   236→    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+   237→    if (raw) dailyMemories.push(JSON.parse(raw));
+   238→  }
+   239→
+   240→  if (dailyMemories.length < 3) {
+   241→    return { skipped: true, reason: `Seulement ${dailyMemories.length} mémoires (min 3)`, hasEnough: false };
+   242→  }
+   243→
+   244→  // 2. Collecter les narratives
+   245→  const narrativesRaw = await env.CACHE.get(`${MEM_PREFIX}narratives`);
+   246→  const narratives = narrativesRaw ? JSON.parse(narrativesRaw) : null;
+   247→
+   248→  // 3. Construire le matériel de rêve (compact)
+   249→  const dreamMaterial = buildDreamMaterial(dailyMemories, narratives);
+   250→
+   251→  // 4. Appel IA de distillation
+   252→  const startTime = Date.now();
+   253→  let distilled = null;
+   254→  try {
+   255→    distilled = await callAIDream(env, dreamMaterial);
+   256→  } catch (err) {
+   257→    console.error(`Rêve IA échoué: ${err.message}`);
+   258→    // Fallback : distillation rule-based
+   259→    distilled = ruleBasedDistillation(dailyMemories, narratives);
+   260→  }
+   261→  const dreamDuration = Date.now() - startTime;
+   262→
+   263→  // 5. Stocker la distillation mensuelle
+   264→  const distilledData = {
+   265→    month: monthKey,
+   266→    date: today.toISOString().split('T')[0],
+   267→    daysAnalyzed: dailyMemories.length,
+   268→    dreamDurationMs: dreamDuration,
+   269→    aiPowered: !!distilled.aiGenerated,
+   270→    ...distilled,
+   271→  };
+   272→
+   273→  await env.CACHE.put(distilledKey, JSON.stringify(distilledData), { expirationTtl: 365 * 24 * 3600 });
+   274→
+   275→  // 6. Mettre à jour la mémoire éditoriale
+   276→  await updateEditorialMemory(env, dailyMemories, distilled);
+   277→
+   278→  // 7. Enregistrer le dernier rêve
+   279→  await env.CACHE.put(`${MEM_PREFIX}last_dream`, JSON.stringify({
+   280→    date: today.toISOString().split('T')[0],
+   281→    type: dailyMemories.length >= 7 ? 'deep' : 'light',
+   282→    duration: dreamDuration,
+   283→    daysAnalyzed: dailyMemories.length,
+   284→    monthKey,
+   285→  }), { expirationTtl: 30 * 24 * 3600 });
+   286→
+   287→  // 8. Nettoyer les vieilles mémoires épisodiques (au-delà de 14 jours)
+   288→  await pruneOldMemories(env, 14);
+   289→
+   290→  return {
+   291→    success: true,
+   292→    daysAnalyzed: dailyMemories.length,
+   293→    dreamDurationMs: dreamDuration,
+   294→    monthKey,
+   295→    distilledThemes: distilled.patterns?.length || 0,
+   296→    narrativeCount: narratives?.active?.length || 0,
+   297→  };
+   298→}
+   299→
+   300→// ============================================================
+   301→// COUCHE 5 — MÉMOIRE ÉDITORIALE (préférences apprises)
+   302→// KV: memory:editorial  (TTL 365j)
+   303→// Apprend quels patterns fonctionnent bien
+   304→// ============================================================
+   305→
+   306→async function updateEditorialMemory(env, dailyMemories, distilled) {
+   307→  const key = `${MEM_PREFIX}editorial`;
+   308→  const raw = await env.CACHE.get(key);
+   309→  let editorial = raw ? JSON.parse(raw) : {
+   310→    sourcePatterns: {},
+   311→    topicBalance: {},
+   312→    avgArticleCount: 0,
+   313→    avgThemesPerDay: 0,
+   314→    totalReviews: 0,
+   315→    preferences: [],
+   316→    lastUpdated: null,
+   317→  };
+   318→
+   319→  // Statistiques glissantes
+   320→  editorial.totalReviews++;
+   321→  const recentCounts = dailyMemories.slice(-7).map(m => m.articleCount);
+   322→  editorial.avgArticleCount = Math.round(recentCounts.reduce((a, b) => a + b, 0) / recentCounts.length);
+   323→  const recentThemes = dailyMemories.slice(-7).map(m => m.themes.length);
+   324→  editorial.avgThemesPerDay = Math.round(recentThemes.reduce((a, b) => a + b, 0) / recentThemes.length);
+   325→
+   326→  // Patterns par source
+   327→  for (const mem of dailyMemories) {
+   328→    for (const source of mem.sources) {
+   329→      if (!editorial.sourcePatterns[source]) {
+   330→        editorial.sourcePatterns[source] = { appearances: 0, themesContributed: [] };
+   331→      }
+   332→      editorial.sourcePatterns[source].appearances++;
+   333→      for (const theme of mem.themes.slice(0, 2)) {
+   334→        const existing = new Set(editorial.sourcePatterns[source].themesContributed);
+   335→        existing.add(theme);
+   336→        editorial.sourcePatterns[source].themesContributed = [...existing].slice(0, 10);
+   337→      }
+   338→    }
+   339→  }
+   340→
+   341→  // Préférences apprises (depuis la distillation IA)
+   342→  if (distilled.insights) {
+   343→    for (const insight of distilled.insights.slice(0, 5)) {
+   344→      if (!editorial.preferences.some(p => p.insight === insight)) {
+   345→        editorial.preferences.push({
+   346→          insight,
+   347→          learnedFrom: dailyMemories[dailyMemories.length - 1]?.date,
+   348→          createdAt: new Date().toISOString(),
+   349→        });
+   350→      }
+   351→    }
+   352→    editorial.preferences = editorial.preferences.slice(-10);
+   353→  }
+   354→
+   355→  editorial.lastUpdated = new Date().toISOString();
+   356→  await env.CACHE.put(key, JSON.stringify(editorial), { expirationTtl: 365 * 24 * 3600 });
+   357→  return editorial;
+   358→}
+   359→
+   360→// ============================================================
+   361→// LECTURE — Construire le contexte mémoire pour injection CoT
+   362→// ============================================================
+   363→
+   364→export async function getMemoryContext(env, maxDays = 7) {
+   365→  const today = new Date();
+   366→  const dailyMemories = [];
+   367→  const themesRaw = await env.CACHE.get(`${MEM_PREFIX}themes`);
+   368→  const semantic = themesRaw ? JSON.parse(themesRaw) : null;
+   369→  const narrativesRaw = await env.CACHE.get(`${MEM_PREFIX}narratives`);
+   370→  const narratives = narrativesRaw ? JSON.parse(narrativesRaw) : null;
+   371→  const editorialRaw = await env.CACHE.get(`${MEM_PREFIX}editorial`);
+   372→  const editorial = editorialRaw ? JSON.parse(editorialRaw) : null;
+   373→
+   374→  // Dernière distillation
+   375→  const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+   376→  const lastMonthKey = today.getMonth() === 0
+   377→    ? `${today.getFullYear() - 1}-12`
+   378→    : `${today.getFullYear()}-${String(today.getMonth()).padStart(2, '0')}`;
+   379→  const distilledRaw = await env.CACHE.get(`${MEM_PREFIX}distilled:${monthKey}`)
+   380→    || await env.CACHE.get(`${MEM_PREFIX}distilled:${lastMonthKey}`);
+   381→  const distilled = distilledRaw ? JSON.parse(distilledRaw) : null;
+   382→
+   383→  // Lire les derniers jours de mémoire épisodique
+   384→  for (let i = 1; i <= maxDays; i++) {
+   385→    const d = new Date(today);
+   386→    d.setDate(d.getDate() - i);
+   387→    const dateStr = d.toISOString().split('T')[0];
+   388→    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+   389→    if (raw) dailyMemories.push(JSON.parse(raw));
+   390→  }
+   391→
+   392→  if (dailyMemories.length === 0 && !semantic && !distilled) {
+   393→    return null;
+   394→  }
+   395→
+   396→  return buildRichContextString(dailyMemories, semantic, narratives, distilled, editorial);
+   397→}
+   398→
+   399→// ============================================================
+   400→// NETTOYAGE — Supprimer les anciennes mémoires
+   401→// ============================================================
+   402→
+   403→export async function pruneOldMemories(env, keepDays = 14) {
+   404→  const today = new Date();
+   405→  let pruned = 0;
+   406→
+   407→  for (let i = keepDays + 1; i <= 60; i++) {
+   408→    const d = new Date(today);
+   409→    d.setDate(d.getDate() - i);
+   410→    const dateStr = d.toISOString().split('T')[0];
+   411→    const key = `${MEM_PREFIX}day:${dateStr}`;
+   412→    const existing = await env.CACHE.get(key);
+   413→    if (existing) {
+   414→      await env.CACHE.delete(key);
+   415→      pruned++;
+   416→    }
+   417→  }
+   418→
+   419→  return pruned;
+   420→}
+   421→
+   422→// ============================================================
+   423→// STATISTIQUES — Pour le endpoint /memory
+   424→// ============================================================
+   425→
+   426→export async function getMemoryStats(env) {
+   427→  const today = new Date();
+   428→  const stats = {
+   429→    totalDailyMemories: 0,
+   430→    semanticThemes: 0,
+   431→    activeNarratives: 0,
+   432→    hasDistillation: false,
+   433→    hasEditorial: false,
+   434→    lastDream: null,
+   435→    topThemes: [],
+   436→    activeNarrativeTitles: [],
+   437→  };
+   438→
+   439→  // Compter les mémoires quotidiennes (derniers 14 jours)
+   440→  for (let i = 0; i <= 14; i++) {
+   441→    const d = new Date(today);
+   442→    d.setDate(d.getDate() - i);
+   443→    const dateStr = d.toISOString().split('T')[0];
+   444→    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+   445→    if (raw) stats.totalDailyMemories++;
+   446→  }
+   447→
+   448→  // Thèmes sémantiques
+   449→  const themesRaw = await env.CACHE.get(`${MEM_PREFIX}themes`);
+   450→  if (themesRaw) {
+   451→    const semantic = JSON.parse(themesRaw);
+   452→    stats.semanticThemes = Object.keys(semantic.themes).length;
+   453→    stats.totalDays = semantic.totalDays;
+   454→    stats.topThemes = Object.entries(semantic.themes)
+   455→      .sort((a, b) => b[1].count - a[1].count)
+   456→      .slice(0, 8)
+   457→      .map(([k, v]) => ({ theme: v.name, count: v.count, lastSeen: v.lastSeen, days: v.days?.length || 0 }));
+   458→  }
+   459→
+   460→  // Narratives
+   461→  const narrativesRaw = await env.CACHE.get(`${MEM_PREFIX}narratives`);
+   462→  if (narrativesRaw) {
+   463→    const narratives = JSON.parse(narrativesRaw);
+   464→    stats.activeNarratives = narratives.active?.length || 0;
+   465→    stats.activeNarrativeTitles = (narratives.active || []).slice(0, 5).map(n => ({
+   466→      title: n.title, days: n.dayCount, lastSeen: n.lastSeen,
+   467→    }));
+   468→  }
+   469→
+   470→  // Distillation
+   471→  const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+   472→  const distilledRaw = await env.CACHE.get(`${MEM_PREFIX}distilled:${monthKey}`);
+   473→  if (distilledRaw) {
+   474→    stats.hasDistillation = true;
+   475→    const d = JSON.parse(distilledRaw);
+   476→    stats.distillationInfo = { month: d.month, daysAnalyzed: d.daysAnalyzed, aiPowered: d.aiPowered };
+   477→  }
+   478→
+   479→  // Éditorial
+   480→  const editorialRaw = await env.CACHE.get(`${MEM_PREFIX}editorial`);
+   481→  if (editorialRaw) {
+   482→    stats.hasEditorial = true;
+   483→    const e = JSON.parse(editorialRaw);
+   484→    stats.editorialInfo = { totalReviews: e.totalReviews, avgArticles: e.avgArticleCount, preferences: e.preferences?.length || 0 };
+   485→  }
+   486→
+   487→  // Dernier rêve
+   488→  const lastDreamRaw = await env.CACHE.get(`${MEM_PREFIX}last_dream`);
+   489→  if (lastDreamRaw) stats.lastDream = JSON.parse(lastDreamRaw);
+   490→
+   491→  return stats;
+   492→}
+   493→
+   494→// ============================================================
+   495→// FONCTIONS INTERNES — Construction du matériel de rêve
+   496→// ============================================================
+   497→
+   498→function buildDreamMaterial(dailyMemories, narratives) {
+   499→  let material = `## MATÉRIEL DE RÊVE — ${dailyMemories.length} jours de mémoires\n\n`;
+   500→
+   501→  // Résumé chronologique compact
+   502→  material += '### Chronologie (du plus ancien au plus récent)\n';
+   503→  for (const mem of dailyMemories) {
+   504→    const themesStr = mem.themes.slice(0, 3).join(' | ');
+   505→    material += `- ${mem.date}: ${themesStr} (${mem.articleCount} articles, ${mem.sourceCount} sources)\n`;
+   506→  }
+   507→
+   508→  // Thèmes avec fréquence
+   509→  const themeFreq = {};
+   510→  for (const mem of dailyMemories) {
+   511→    for (const t of mem.themes) {
+   512→      const norm = normalizeTheme(t);
+   513→      themeFreq[norm] = (themeFreq[norm] || 0) + 1;
+   514→    }
+   515→  }
+   516→  const frequent = Object.entries(themeFreq)
+   517→    .sort((a, b) => b[1] - a[1])
+   518→    .slice(0, 12);
+   519→
+   520→  material += '\n### Thèmes par fréquence\n';
+   521→  for (const [key, count] of frequent) {
+   522→    const bar = '█'.repeat(Math.min(count, 10));
+   523→    material += `- ${key.replace(/_/g, ' ')} : ${bar} (${count}/${dailyMemories.length} jours)\n`;
+   524→  }
+   525→
+   526→  // Sources les plus présentes
+   527→  const sourceFreq = {};
+   528→  for (const mem of dailyMemories) {
+   529→    for (const s of mem.sources) {
+   530→      sourceFreq[s] = (sourceFreq[s] || 0) + 1;
+   531→    }
+   532→  }
+   533→  const topSources = Object.entries(sourceFreq)
+   534→    .sort((a, b) => b[1] - a[1])
+   535→    .slice(0, 8);
+   536→
+   537→  material += '\n### Sources les plus citées\n';
+   538→  for (const [source, count] of topSources) {
+   539→    material += `- ${source} : présente ${count}/${dailyMemories.length} jours\n`;
+   540→  }
+   541→
+   542→  // Faits clés par jour
+   543→  material += '\n### Faits marquants par jour\n';
+   544→  for (const mem of dailyMemories.slice(-5)) {
+   545→    material += `\n**${mem.date}**\n`;
+   546→    for (const fact of mem.keyFacts.slice(0, 3)) {
+   547→      material += `  - ${fact}\n`;
+   548→    }
+   549→  }
+   550→
+   551→  // Narratives actives
+   552→  if (narratives?.active?.length > 0) {
+   553→    material += '\n### Narratives en cours\n';
+   554→    for (const nar of narratives.active.slice(0, 5)) {
+   555→      material += `- **${nar.title}** : ${nar.dayCount} jours, dernier le ${nar.lastSeen}\n`;
+   556→      if (nar.facts?.length > 0) {
+   557→        material += `  Évolution: ${nar.facts[nar.facts.length - 1].fact}\n`;
+   558→      }
+   559→    }
+   560→  }
+   561→
+   562→  // Acteurs récurrents
+   563→  const actorFreq = {};
+   564→  for (const mem of dailyMemories) {
+   565→    if (mem.actors) {
+   566→      for (const a of mem.actors) {
+   567→        actorFreq[a] = (actorFreq[a] || 0) + 1;
+   568→      }
+   569→    }
+   570→  }
+   571→  const topActors = Object.entries(actorFreq)
+   572→    .sort((a, b) => b[1] - a[1])
+   573→    .slice(0, 8);
+   574→
+   575→  if (topActors.length > 0) {
+   576→    material += '\n### Acteurs récurrents\n';
+   577→    for (const [actor, count] of topActors) {
+   578→      material += `- ${actor} : ${count} mentions\n`;
+   579→    }
+   580→  }
+   581→
+   582→  return material;
+   583→}
+   584→
+   585→// ============================================================
+   586→// FONCTIONS INTERNES — Appel IA de rêve
+   587→// ============================================================
+   588→
+   589→const DREAM_PROMPT = `Tu es un système de "rêve" pour une revue de presse automatique. Tu analyses ${'${days}'} jours de mémoires éditoriales pour en extraire des connaissances de haut niveau.
+   590→
+   591→## TA MISSION
+   592→Produis un JSON STRICT avec cette structure exacte (pas de markdown, pas de commentaires) :
+   593→{
+   594→  "patterns": [
+   595→    {"type": "recurring", "theme": "nom du thème", "frequency": "X/N jours", "trend": "rising|stable|declining", "note": "explication courte"}
+   596→  ],
+   597→  "narratives": [
+   598→    {"title": "titre du récit", "arc": "description de l'évolution sur la période", "key_moments": ["moment 1", "moment 2"], "status": "active|peaked|resolved"}
+   599→  ],
+   600→  "insights": [
+   601→    "insight 1 : observation profonde sur les tendances",
+   602→    "insight 2 : corrélation inattendue entre sujets"
+   603→  ],
+   604→  "source_dynamics": [
+   605→    {"source": "nom source", "role": "leader/follower/specialized", "notes": "comment cette source se comporte"}
+   606→  ],
+   607→  "blind_spots": [
+   608→    "angle ou sujet rarement couvert"
+   609→  ],
+   610→  "macro_trends": [
+   611→    {"trend": "nom de la tendance macro", "description": "explication", "timescale": "court/moyen/long terme"}
+   612→  ]
+   613→}
+   614→
+   615→## RÈGLES
+   616→- Réponse JSON UNIQUEMENT, pas de texte avant ou après
+   617→- Sois précis et factuel, basé uniquement sur les données fournies
+   618→- Les insights doivent être non-évidents (pas juste "le thème X est fréquent")
+   619→- Identifie les corrélations et les évolutions, pas juste les occurrences
+   620→- Maximum 6 patterns, 4 narratives, 5 insights, 5 source_dynamics, 3 blind_spots, 4 macro_trends`;
+   621→
+   622→async function callAIDream(env, dreamMaterial) {
+   623→  const userPrompt = `Voici le matériel de rêve : ${dreamMaterial}\n\nProduis le JSON de distillation.`;
+   624→
+   625→  try {
+   626→    const result = await callAI(env, DREAM_PROMPT, userPrompt, false);
+   627→    // Parser le JSON de la réponse
+   628→    let jsonStr = result.trim();
+   629→    // Enlever les blocs code markdown si présents
+   630→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   631→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   632→    // Enlever les lignes qui ne sont pas du JSON
+   633→    if (!jsonStr.startsWith('{')) {
+   634→      const firstBrace = jsonStr.indexOf('{');
+   635→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   636→    }
+   637→
+   638→    const parsed = JSON.parse(jsonStr);
+   639→    return {
+   640→      ...parsed,
+   641→      aiGenerated: true,
+   642→      generatedAt: new Date().toISOString(),
+   643→    };
+   644→  } catch (err) {
+   645→    console.error(`Dream AI parse error: ${err.message}`);
+   646→    throw err;
+   647→  }
+   648→}
+   649→
+   650→// ============================================================
+   651→// FONCTIONS INTERNES — Distillation rule-based (fallback)
+   652→// ============================================================
+   653→
+   654→function ruleBasedDistillation(dailyMemories, narratives) {
+   655→  // Patterns récurrents
+   656→  const themeFreq = {};
+   657→  for (const mem of dailyMemories) {
+   658→    for (const t of mem.themes) {
+   659→      const norm = normalizeTheme(t);
+   660→      themeFreq[norm] = (themeFreq[norm] || 0) + 1;
+   661→    }
+   662→  }
+   663→
+   664→  const patterns = Object.entries(themeFreq)
+   665→    .sort((a, b) => b[1] - a[1])
+   666→    .slice(0, 6)
+   667→    .map(([key, count]) => ({
+   668→      type: 'recurring',
+   669→      theme: key.replace(/_/g, ' '),
+   670→      frequency: `${count}/${dailyMemories.length} jours`,
+   671→      trend: count > dailyMemories.length * 0.5 ? 'stable' : 'emerging',
+   672→      note: `Présent ${count} jours sur ${dailyMemories.length}`,
+   673→    }));
+   674→
+   675→  // Narratives depuis la mémoire narratives
+   676→  const narList = (narratives?.active || []).slice(0, 4).map(n => ({
+   677→    title: n.title,
+   678→    arc: `${n.dayCount} jours d'évolution`,
+   679→    key_moments: n.facts?.slice(-2).map(f => f.fact) || [],
+   680→    status: n.dayCount >= 5 ? 'peaked' : 'active',
+   681→  }));
+   682→
+   683→  // Source dynamics
+   684→  const sourceFreq = {};
+   685→  for (const mem of dailyMemories) {
+   686→    for (const s of mem.sources) {
+   687→      sourceFreq[s] = (sourceFreq[s] || 0) + 1;
+   688→    }
+   689→  }
+   690→  const sourceDynamics = Object.entries(sourceFreq)
+   691→    .sort((a, b) => b[1] - a[1])
+   692→    .slice(0, 5)
+   693→    .map(([source, count]) => ({
+   694→      source,
+   695→      role: count > dailyMemories.length * 0.7 ? 'leader' : 'contributor',
+   696→      notes: `Présent ${count} jours`,
+   697→    }));
+   698→
+   699→  return {
+   700→    patterns,
+   701→    narratives: narList,
+   702→    insights: [],
+   703→    source_dynamics: sourceDynamics,
+   704→    blind_spots: [],
+   705→    macro_trends: [],
+   706→    aiGenerated: false,
+   707→    generatedAt: new Date().toISOString(),
+   708→  };
+   709→}
+   710→
+   711→// ============================================================
+   712→// FONCTIONS INTERNES — Construction du contexte riche pour CoT
+   713→// ============================================================
+   714→
+   715→function buildRichContextString(dailyMemories, semantic, narratives, distilled, editorial) {
+   716→  let context = '## CONTEXTE MÉMOIRE (mémoire éditoriale long terme)\n\n';
+   717→
+   718→  // 1. Narratives actives (priorité haute — fil rouge)
+   719→  if (narratives?.active?.length > 0) {
+   720→    context += '### Récits en cours (narratives)\n';
+   721→    context += 'Ces histoires traversent plusieurs jours. Situe l\'actualité du jour par rapport à ces récits :\n\n';
+   722→    for (const nar of narratives.active.slice(0, 4)) {
+   723→      const statusIcon = nar.dayCount >= 5 ? '🔴' : nar.dayCount >= 3 ? '🟡' : '🟢';
+   724→      context += `${statusIcon} **${nar.title}** (${nar.dayCount} jours, dernier: ${nar.lastSeen})\n`;
+   725→      if (nar.facts?.length > 0) {
+   726→        const lastFact = nar.facts[nar.facts.length - 1];
+   727→        context += `  Dernière évolution: ${lastFact.fact}\n`;
+   728→      }
+   729→    }
+   730→    context += '\n';
+   731→  }
+   732→
+   733→  // 2. Connaissances distillées (insights de haut niveau)
+   734→  if (distilled) {
+   735→    if (distilled.insights?.length > 0) {
+   736→      context += '### Connaissances consolidées (rêve)\n';
+   737→      context += 'Patterns identifiés par analyse croisée des jours précédents :\n\n';
+   738→      for (const insight of distilled.insights.slice(0, 4)) {
+   739→        context += `- 💡 ${insight}\n`;
+   740→      }
+   741→      context += '\n';
+   742→    }
+   743→
+   744→    if (distilled.macro_trends?.length > 0) {
+   745→      context += '### Tendances macro\n';
+   746→      for (const trend of distilled.macro_trends.slice(0, 3)) {
+   747→        context += `- 📈 **${trend.trend}** : ${trend.description}\n`;
+   748→      }
+   749→      context += '\n';
+   750→    }
+   751→
+   752→    if (distilled.blind_spots?.length > 0) {
+   753→      context += '### Angles morts détectés\n';
+   754→      for (const bs of distilled.blind_spots.slice(0, 2)) {
+   755→        context += `- ⚠️ ${bs}\n`;
+   756→      }
+   757→      context += '\n';
+   758→    }
+   759→  }
+   760→
+   761→  // 3. Thèmes sémantiques récurrents
+   762→  if (semantic && Object.keys(semantic.themes).length > 0) {
+   763→    context += '### Thèmes récurrents\n';
+   764→    const sorted = Object.entries(semantic.themes)
+   765→      .sort((a, b) => b[1].count - a[1].count)
+   766→      .slice(0, 6);
+   767→
+   768→    for (const [key, data] of sorted) {
+   769→      const trend = data.count > 5 ? 'récurrent' : data.count > 2 ? 'émergent' : 'nouveau';
+   770→      const trendIcon = data.count > 5 ? '🔴' : data.count > 2 ? '🟡' : '🟢';
+   771→      context += `${trendIcon} **${data.name}** (${data.count}j, ${trend})\n`;
+   772→    }
+   773→    context += '\n';
+   774→  }
+   775→
+   776→  // 4. Mémoire épisodique récente (derniers 3 jours, compact)
+   777→  if (dailyMemories.length > 0) {
+   778→    context += '### Revues récentes (derniers jours)\n';
+   779→    for (const mem of dailyMemories.slice(0, 3)) {
+   780→      const themesStr = mem.themes.slice(0, 3).join(', ') || 'sans thème';
+   781→      context += `- **${mem.date}** : ${themesStr} (${mem.articleCount} articles)\n`;
+   782→    }
+   783→    context += '\n';
+   784→  }
+   785→
+   786→  // 5. Préférences éditoriales apprises
+   787→  if (editorial?.preferences?.length > 0) {
+   788→    context += '### Préférences apprises\n';
+   789→    for (const pref of editorial.preferences.slice(0, 3)) {
+   790→      context += `- 📝 ${pref.insight}\n`;
+   791→    }
+   792→    context += '\n';
+   793→  }
+   794→
+   795→  // Instructions pour l'IA
+   796→  context += '### Instructions d\'utilisation de la mémoire\n';
+   797→  context += '- Si un sujet fait partie d\'une NARRATIVE en cours, situe l\'évolution dans le récit\n';
+   798→  context += '- Mentionne les TENDANCES MACRO quand l\'actualité du jour s\'inscrit dans ce cadre\n';
+   799→  context += '- Pour les thèmes RÉCURRENTS, indique si c\'est une continuité ou un changement\n';
+   800→  context += '- Si l\'actualité touche un ANGLE MORT identifié, accorde-lui une attention particulière\n';
+   801→  context += '- Ne répète PAS les informations déjà détaillées les jours précédents sauf évolution significative\n';
+   802→  context += '- Les CONNAISSANCES CONSOLIDÉES sont des patterns fiables — utilise-les pour enrichir l\'analyse\n';
+   803→
+   804→  return context;
+   805→}
+   806→
+   807→// ============================================================
+   808→// FONCTIONS INTERNES — Extraction depuis le texte de revue
+   809→// ============================================================
+   810→
+   811→function extractThemesFromReview(reviewText) {
+   812→  const themes = [];
+   813→  const sectionRegex = /\*\*([^*]{3,40})\*\*\s*[:：]/g;
+   814→  let match;
+   815→  while ((match = sectionRegex.exec(reviewText)) !== null) {
+   816→    const theme = match[1].trim();
+   817→    const nonThemes = [
+   818→      "L'ESSENTIEL DU JOUR", "ANALYSE THÉMATIQUE", "TENDANCES",
+   819→      "CHIFFRES CLÉS", "À SURVEILLER", "ESSENTIEL", "TENDANCES & PERSPECTIVES",
+   820→    ];
+   821→    if (!nonThemes.some(nt => theme.toUpperCase().includes(nt.toUpperCase()))) {
+   822→      themes.push(theme);
+   823→    }
+   824→  }
+   825→
+   826→  const axiomRegex = /\*\*([^*]{2,20})\s*[:：]\*\*/g;
+   827→  while ((match = axiomRegex.exec(reviewText)) !== null) {
+   828→    const axiom = match[1].trim();
+   829→    if (axiom.length > 3 && axiom.length < 25 && !themes.includes(axiom)) {
+   830→      themes.push(axiom);
+   831→    }
+   832→  }
+   833→
+   834→  return [...new Set(themes)].slice(0, 10);
+   835→}
+   836→
+   837→function extractKeyFacts(reviewText) {
+   838→  const facts = [];
+   839→  const factRegex = /^-\s+(.{30,200})$/gm;
+   840→  let match;
+   841→  while ((match = factRegex.exec(reviewText)) !== null) {
+   842→    const fact = match[1].trim();
+   843→    if (/\d+/.test(fact)) facts.push(fact);
+   844→  }
+   845→  return facts.slice(0, 10);
+   846→}
+   847→
+   848→function extractActors(reviewText) {
+   849→  const actors = new Set();
+   850→  // Patterns communs : noms propres après "Selon", "D'après", en gras
+   851→  const selonRegex = /(?:Selon|D'après)\s+\*\*([^*]{2,40})\*\*/g;
+   852→  let match;
+   853→  while ((match = selonRegex.exec(reviewText)) !== null) {
+   854→    actors.add(match[1].trim());
+   855→  }
+   856→  // Acteurs dans les sections thématiques (noms propres en gras)
+   857→  const actorRegex = /\*\*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ\s]{2,30}(?:\s+(?:Macron|Barnier|Le Pen|Mélenchon|Scholz|Trump|Biden|Xi|Poutine|Starmer|Lula)))\*\*/g;
+   858→  while ((match = actorRegex.exec(reviewText)) !== null) {
+   859→    actors.add(match[1].trim());
+   860→  }
+   861→  return [...actors].slice(0, 10);
+   862→}
+   863→
+   864→function normalizeTheme(theme) {
+   865→  return theme
+   866→    .toLowerCase()
+   867→    .replace(/[^a-zàâéèêëïîôùûüÿçœæ0-9\s]/g, '')
+   868→    .replace(/\s+/g, '_')
+   869→    .substring(0, 50);
+   870→}
+   871→
+   872→function computeThemeSimilarity(a, b) {
+   873→  const wordsA = new Set(a.split(/[\s_]+/));
+   874→  const wordsB = new Set(b.split(/[\s_]+/));
+   875→  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+   876→  let intersection = 0;
+   877→  for (const w of wordsA) {
+   878→    if (wordsB.has(w)) intersection++;
+   879→  }
+   880→  return intersection / Math.max(wordsA.size, wordsB.size);
+   881→}
+   882→
+   883→function daysBetween(dateStr1, dateStr2) {
+   884→  const d1 = new Date(dateStr1);
+   885→  const d2 = new Date(dateStr2);
+   886→  return Math.round(Math.abs(d2 - d1) / (24 * 3600 * 1000));
+   887→}
