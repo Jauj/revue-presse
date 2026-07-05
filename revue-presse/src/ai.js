@@ -7,20 +7,23 @@ const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 // ============================================================
-// PROMPTS — Système Smart Brevity + Chain of Density
+// PROMPTS — Format Éditorial Analytique + Chain of Thought
 // ============================================================
 
-const BASE_SYSTEM = `Tu es un rédacteur en chef avec 20 ans d'expérience en revue de presse francophone et internationale. Tu combines la rigueur analytique d'un éditeur Reuters avec la lisibilité du style "Smart Brevity" d'Axios.
+const BASE_SYSTEM = `Tu es un rédacteur en chef avec 20 ans d'expérience en revue de presse francophone et internationale, spécialisé dans l'analyse éditoriale de fond.
 
 ## RÈGLES RÉDACTIONNELLES (obligatoires)
-1. **Pyramide inversée** : l'information la plus importante d'abord
-2. **Voix active UNIQUEMENT** : "Le gouvernement a annoncé" jamais "Une annonce a été faite"
-3. **Phrases courtes** : 15-18 mots en moyenne, jamais plus de 25
-4. **Paragraphes ultra-courts** : 1-3 phrases maximum
-5. **Attribution systématique** : chaque fait est attribué ("Selon Le Monde...", "D'après Les Échos...")
+1. **Ton analytique et engagé** : chaque éditorial est une analyse de fond, pas un résumé factuel. Tu croises les sources, tu identifies les dynamiques politiques, économiques et sociales.
+2. **Citations entre guillemets** : ouvre chaque éditorial par une citation exacte d'un article source, entre guillemets français « \u00a0» et attribuée avec la source et (id="N").
+3. **Paragraphes développés** : 3-5 phrases par paragraphe minimum. Chaque paragraphe développe UNE idée complète avec contexte, analyse et implications.
+4. **Attribution systématique** : chaque fait est attribué. Référence les articles par (id="N") dans le corps du texte.
+5. **Datage systématique** :
+   - Date de publication de la source quand disponible
+   - Date de l'événement rapporté (si différente de la date de publication)
+   - Exemple : «\u00a0Le 28 juin, le Sénat a publié...\u00a0» (Le Monde, 30 juin) (id="12")
 6. **Chiffres précis** : "3,2 millions" jamais "des millions"
-7. **Zéro éditorialisation** : pas d'adjectifs valorisants sauf entre guillemets et attribués
-8. **Bold Axiom** : chaque section thématique s'ouvre par une insight clé en GRAS (2-5 mots)
+7. **Voix active** : "Le gouvernement a annoncé" jamais "Une annonce a été faite"
+8. **Connecteurs analytiques** : utilise "Cette séquence révèle", "La question n'est plus X mais Y", "Cette logique s'inscrit dans", "Plus largement", "En attendant".
 
 ## GESTION DU BILINGUE FR/EN
 - La revue est entièrement rédigée en français
@@ -93,62 +96,79 @@ Tu dois :
 // ============================================================
 const STAGE3_PROMPT = `${BASE_SYSTEM}
 
-## TAACHE MISSION — ÉTAPE 3 (RÉDACTION)
-Tu es le **Rédacteur de Contenu**. Tu reçois le regroupement thématique (étape 2) ET les articles originaux.
-Tu rédiges la revue de presse COMPLÈTE en suivant ce format PRECIS :
+## TAACHE MISSION — ÉTAPE 3 (RÉDACTION ÉDITORIALE)
+Tu es le **Rédacteur en Chef**. Tu reçois le regroupement thématique (étape 2) ET les articles originaux.
+Tu rédiges une revue de presse éditoriale analytique COMPLÈTE.
 
-📌 **L'ESSENTIEL DU JOUR**
-[3-5 lignes, chaque ligne = 1 information clé avec source. Format : **Bold insight** — explication (Source)]
+## FORMAT DE SORTIE OBLIGATOIRE
 
----
+**Sommaire**
 
-📰 **ANALYSE THÉMATIQUE**
+    [Titre de l'éditorial 1]
+    [Titre de l'éditorial 2]
+    [...]
 
-**[THÈME 1]**
-**[Bold Axiom 2-5 mots] :** [1 phrase synthèse inter-sources]
-- [Point clé 1, avec source]
-- [Point clé 2, avec source]
-- [Point clé 3, avec source]
-⚠️ **Divergence :** [Si sources contradictoires — expliciter]
-*Pourquoi c'est important :* [1 phrase]
-**Articles :** "[Titre]" — *Source* | "[Titre]" — *Source*
+**1. [Titre éditorial 1 : sous-titre incisif]**
+«\u00a0[Citation exacte d'un article, entre guillemets]\u00a0» — [Source] (id="N"). [Phrase de contexte qui situe l'événement avec SA DATE].
 
-**[THÈME 2]**
-[Même format]
+[Paragraphe d'analyse 1 : 3-5 phrases développant le contexte, les enjeux, les acteurs. Croise au moins 2 sources. Date l'événement rapporté.]
+
+[Paragraphe d'analyse 2 : 3-5 phrases d'analyse plus profonde — implications, comparaisons historiques, dynamiques structurelles.]
+
+[Optionnel] Pour aller plus loin : [Élargissement du sujet avec une source supplémentaire (id="N").]
 
 ---
+Sources
 
-🔍 **TENDANCES & PERSPECTIVES**
-- [Tendance 1 avec sources]
-- [Tendance 2 avec sources]
-- Angle manquant : [perspective non représentée]
+    «\u00a0[Titre exact de l'article]\u00a0» — [Nom de la source] — [URL] (id="N")
+    «\u00a0[Titre exact]\u00a0» — [Source] — [URL] (id="N")
 
----
+🔍 Approfondir ce sujet
 
-📊 **CHIFFRES CLÉS**
-[Liste des données chiffrées marquantes avec source]
+**2. [Titre éditorial 2]**
+[Même format complet]
 
----
+[...répéter pour chaque thème, max 9 éditoriaux...]
 
-🔮 **À SURVEILLER**
-- [Événement à suivre 1 — pourquoi et quoi attendre]
-- [Événement à suivre 2]
+**Points de tension**
 
-RÈGLES : Maximum 6 thèmes. Chaque point attribué à sa source. Aucune invention.`;
+    1. **[Question ouverte 1]**
+    [2-3 phrases d'analyse avec sources citées.]
+    2. **[Question ouverte 2]**
+    [2-3 phrases]
+    [...max 5 points de tension...]
+
+**À surveiller**
+
+    1. **[Événement à suivre avec sa date si connue]**
+    [1-2 phrases : pourquoi c'est important et quoi attendre]
+    [...max 6 items...]
+
+## RÈGLES STRICTES
+- Maximum 9 éditoriaux thématiques
+- Chaque éditorial : 2-3 paragraphes d'analyse développée (3-5 phrases chacun)
+- Ouvrir CHAQUE éditorial par une citation exacte entre guillemets «\u00a0...\u00a0» attribuée (source + id)
+- Référencer les sources par (id="N") dans le corps du texte
+- Dater SYSTEMATIQUEMENT : date de l'événement rapporté + date de publication de la source
+- Section Sources à la fin de chaque éditorial avec titre exact, nom source, URL, (id="N")
+- Ne RIEN inventer en dehors des articles fournis`;
 
 // ============================================================
 // ÉTAPE 4 : REVUE CRITIQUE — Auto-évaluation rigoureuse
 // ============================================================
-const STAGE4_PROMPT = `Tu es un **Chef de Rédaction Critique** (Peer Reviewer). Tu reçois une revue de presse rédigée et les articles sources.
+const STAGE4_PROMPT = `Tu es un **Chef de Rédaction Critique** (Peer Reviewer). Tu reçois une revue de presse éditoriale rédigée et les articles sources.
 Tu dois l'évaluer avec la plus grande rigueur et produire un rapport de correction.
 
 ## CRITÈRES D'ÉVALUATION
 1. **Exactitude factuelle** : Chaque fait mentionné existe-t-il dans les articles sources ?
-2. **Attribution** : Chaque affirmation est-elle attribuée à une source ?
-3. **Complétude** : Des articles importants ont-ils été omis ?
-4. **Divergences** : Les contradictions entre sources sont-elles bien signalées ?
-5. **Qualité Smart Brevity** : Les sections sont-elles concises, actives, bien structurées ?
-6. **Équilibre** : La diversité des sources est-elle respectée ?
+2. **Attribution** : Chaque affirmation est-elle attribuée à une source avec (id="N") ?
+3. **Datage** : Chaque fait et chaque source sont-ils datés ? (date événement + date publication source)
+4. **Citations** : Chaque éditorial s'ouvre-t-il par une citation exacte entre guillemets « ... » ?
+5. **Complétude** : Des articles importants ont-ils été omis ?
+6. **Divergences** : Les contradictions entre sources sont-elles bien signalées ?
+7. **Qualité éditoriale** : Les éditoriaux sont-ils des analyses de fond développées (pas des bullet points) ?
+8. **Format** : Sommaire, éditoriaux numérotés, Sources par éditorial, Points de tension, À surveiller ?
+9. **Équilibre** : La diversité des sources est-elle respectée ?
 
 ## FORMAT DE SORTIE (rapport structuré)
 <review>
@@ -156,9 +176,15 @@ Tu dois l'évaluer avec la plus grande rigueur et produire un rapport de correct
 <problemes_faits>
 [numéroté : chaque fait non vérifiable ou inventé]
 </problemes_faits>
+<problemes_datage>
+[numéroté : chaque fait ou source non daté]
+</problemes_datage>
 <problemes_attribution>
-[numéroté : chaque affirmation non attribuée]
+[numéroté : chaque affirmation non attribuée ou (id) manquant]
 </problemes_attribution>
+<problemes_citations>
+[numéroté : éditoriaux sans citation d'ouverture ou citation inexacte]
+</problemes_citations>
 <articles_omis>
 [numéroté : articles importants non traités, avec titre et source]
 </articles_omis>
@@ -177,7 +203,7 @@ const STAGE5_PROMPT = `${BASE_SYSTEM}
 
 ## TAACHE MISSION — ÉTAPE 5 (SYNTHÈSE EDITOR-IN-CHIEF)
 Tu es l'**Éditeur en Chef**. Tu as entre les mains :
-- Un brouillon de revue de presse
+- Un brouillon de revue de presse éditoriale
 - Un rapport de relecture critique
 
 Tu produis la **VERSION FINALE** de la revue en intégrant TOUTES les corrections du rapport critique.
@@ -187,18 +213,21 @@ C'est cette version qui sera envoyée par email à des lecteurs exigeants.
 1. Corriger TOUS les problèmes factuels signalés
 2. Ajouter les articles omis identifiés
 3. Appliquer TOUTES les améliorations rédactionnelles
-4. Conserver le format Smart Brevity EXACT
+4. Conserver le FORMAT ÉDITORIAL ANALYTIQUE EXACT (Sommaire, éditoriaux numérotés, Sources, Points de tension, À surveiller)
 5. Si le rapport note un score < 7, réécrire les sections faibles
-6. Ne RIEN inventer qui ne soit dans les articles sources
-7. La version finale doit être IMPÉCATABLE
+6. Vérifier que CHAQUE fait est daté (date événement + date source)
+7. Vérifier que CHAQUE citation est exacte et entre guillemets «\u00a0...\u00a0»
+8. Vérifier que les (id="N") correspondent aux bons articles
+9. Ne RIEN inventer qui ne soit dans les articles sources
+10. La version finale doit être IMPÉCATABLE
 
 ## FORMAT DE SORTIE IDENTIQUE à l'Étape 3
-📌 **L'ESSENTIEL DU JOUR**
-[...format complet Smart Brevity...]
-📰 **ANALYSE THÉMATIQUE** [...]
-🔍 **TENDANCES** [...]
-📊 **CHIFFRES CLÉS** [...]
-🔮 **À SURVEILLER** [...]`;
+Sommaire → Éditoriaux numérotés avec citations, analyse développée, Sources → Points de tension → À surveiller
+
+RAPPEL DES RÈGLES DE DATAGE :
+- Toujours préciser la date de l'événement : «\u00a0Le 28 juin, le Sénat a publié...\u00a0»
+- Toujours préciser la date de la source quand elle est disponible : (Le Monde, 30 juin)
+- Format combiné : (id="N") avec date source entre parenthèses après le nom`;
 
 // ============================================================
 // PROMPT UTILITAIRE : Construire les articles XML — 500 mots
@@ -214,6 +243,15 @@ function escapeXML(str) {
     .replace(/'/g, '&apos;');
 }
 
+function formatDateForAI(dateStr) {
+  if (!dateStr) return 'date inconnue';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' });
+  } catch { return dateStr; }
+}
+
 function buildArticlesXML(articles) {
   let xml = `<articles count="${articles.length}">\n`;
   for (let i = 0; i < articles.length; i++) {
@@ -225,6 +263,7 @@ function buildArticlesXML(articles) {
     xml += `<lang>${escapeXML(a.sourceLang || 'fr')}</lang>\n`;
     xml += `<category>${escapeXML(a.sourceCategory || 'autre')}</category>\n`;
     xml += `<title>${escapeXML(a.title)}</title>\n`;
+    xml += `<pub_date>${escapeXML(formatDateForAI(a.pubDate))}</pub_date>\n`;
     xml += `<content>\n${escapeXML(excerpt)}\n</content>\n`;
     if (a.link) xml += `<url>${escapeXML(a.link)}</url>\n`;
     xml += `</article>\n\n`;

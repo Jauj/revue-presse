@@ -20,6 +20,10 @@ export function buildEmailHTML(review, articles, date, provider) {
   const articleCount = articles.length;
   const sourceCount = [...new Set(articles.map(a => a.sourceName))].length;
 
+  // Compter les éditoriaux (sections numérotées "1.", "2.", etc.)
+  const editorialMatches = review.match(/^\*\*\d+\./gm) || [];
+  const editorialCount = editorialMatches.length || Math.ceil(articleCount / 4);
+
   // Convertir le Markdown de l'IA en HTML
   const reviewHTML = markdownToHTML(review);
 
@@ -32,21 +36,22 @@ export function buildEmailHTML(review, articles, date, provider) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 680px; margin: 0 auto; padding: 20px; background: #f8f9fa; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.7; color: #1a1a1a; max-width: 680px; margin: 0 auto; padding: 20px; background: #f8f9fa; }
     .container { background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #ffffff; padding: 30px 30px 25px; }
     .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .header .subtitle { margin: 6px 0 0; font-size: 15px; font-style: italic; opacity: 0.8; letter-spacing: 0.3px; }
     .header .date { margin: 8px 0 0; font-size: 14px; opacity: 0.85; }
     .header .stats { margin-top: 12px; display: flex; gap: 20px; font-size: 13px; opacity: 0.9; }
     .header .stats span { display: inline-flex; align-items: center; gap: 5px; }
     .content { padding: 25px 30px 30px; }
-    .content h2 { color: #1a1a2e; font-size: 18px; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e94560; }
+    .content h2 { color: #1a1a2e; font-size: 17px; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e94560; }
     .content h2:first-child { margin-top: 0; }
-    .content h3 { color: #0f3460; font-size: 15px; margin: 18px 0 8px; }
+    .content h3 { color: #0f3460; font-size: 16px; margin: 22px 0 10px; font-weight: 600; }
     .content h4 { color: #333; font-size: 14px; margin: 14px 0 6px; }
-    .content p { margin: 8px 0; font-size: 14px; color: #333; }
+    .content p { margin: 10px 0; font-size: 14px; color: #333; }
     .content ul, .content ol { margin: 8px 0; padding-left: 22px; }
-    .content li { margin: 5px 0; font-size: 14px; color: #333; }
+    .content li { margin: 6px 0; font-size: 14px; color: #333; }
     .content strong { color: #1a1a2e; }
     .content em { color: #666; font-size: 13px; }
     .content hr { border: none; border-top: 1px solid #eee; margin: 25px 0; }
@@ -61,8 +66,10 @@ export function buildEmailHTML(review, articles, date, provider) {
   <div class="container">
     <div class="header">
       <h1>Revue de Presse</h1>
+      <div class="subtitle">Éditorial analytique</div>
       <div class="date">${dateStr}</div>
       <div class="stats">
+        <span>${editorialCount} éditoriaux</span>
         <span>${articleCount} articles</span>
         <span>${sourceCount} sources</span>
       </div>
@@ -72,7 +79,7 @@ export function buildEmailHTML(review, articles, date, provider) {
       ${providerBadge}
     </div>
     <div class="footer">
-      Revue de Presse automatique — Cloudflare Workers — ${dateStr}
+      Revue de Presse éditoriale — Cloudflare Workers — ${dateStr}
     </div>
   </div>
 </body>
