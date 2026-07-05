@@ -233,14 +233,28 @@ export async function dreamDistill(env, daysBack = 14, force = false) {
     }
   }
 
-  // 1. Collecter les mémoires épisodiques
+  // 1. Collecter les mémoires épisodiques via day_index (optimisation KV)
   const dailyMemories = [];
-  for (let i = 1; i <= daysBack; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
-    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
-    if (raw) dailyMemories.push(JSON.parse(raw));
+  const indexRaw = await env.CACHE.get(`${MEM_PREFIX}day_index`);
+  if (indexRaw) {
+    const index = JSON.parse(indexRaw);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - daysBack);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const recentDays = (index.days || []).filter(d => d <= today.toISOString().split('T')[0] && d >= cutoffStr);
+    for (const dateStr of recentDays) {
+      const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+      if (raw) dailyMemories.push(JSON.parse(raw));
+    }
+  } else {
+    // Fallback : lecture séquentielle si pas d'index
+    for (let i = 1; i <= daysBack; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+      if (raw) dailyMemories.push(JSON.parse(raw));
+    }
   }
 
   if (dailyMemories.length < 3) {
@@ -386,13 +400,27 @@ export async function getMemoryContext(env, maxDays = 7) {
     || await env.CACHE.get(`${MEM_PREFIX}distilled:${lastMonthKey}`);
   const distilled = distilledRaw ? JSON.parse(distilledRaw) : null;
 
-  // Lire les derniers jours de mémoire épisodique
-  for (let i = 1; i <= maxDays; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
-    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
-    if (raw) dailyMemories.push(JSON.parse(raw));
+  // Lire les derniers jours de mémoire épisodique via day_index
+  const indexRaw = await env.CACHE.get(`${MEM_PREFIX}day_index`);
+  if (indexRaw) {
+    const index = JSON.parse(indexRaw);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - maxDays);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const todayStr = today.toISOString().split('T')[0];
+    const recentDays = (index.days || []).filter(d => d <= todayStr && d >= cutoffStr);
+    for (const dateStr of recentDays) {
+      const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+      if (raw) dailyMemories.push(JSON.parse(raw));
+    }
+  } else {
+    for (let i = 1; i <= maxDays; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+      if (raw) dailyMemories.push(JSON.parse(raw));
+    }
   }
 
   if (dailyMemories.length === 0 && !semantic && !distilled) {
@@ -442,13 +470,23 @@ export async function getMemoryStats(env) {
     activeNarrativeTitles: [],
   };
 
-  // Compter les mémoires quotidiennes (derniers 14 jours)
-  for (let i = 0; i <= 14; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
-    const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
-    if (raw) stats.totalDailyMemories++;
+  // Compter les mémoires quotidiennes via day_index (optimisation KV)
+  const indexRaw = await env.CACHE.get(`${MEM_PREFIX}day_index`);
+  if (indexRaw) {
+    const index = JSON.parse(indexRaw);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - 14);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const todayStr = today.toISOString().split('T')[0];
+    stats.totalDailyMemories = (index.days || []).filter(d => d <= todayStr && d >= cutoffStr).length;
+  } else {
+    for (let i = 0; i <= 14; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const raw = await env.CACHE.get(`${MEM_PREFIX}day:${dateStr}`);
+      if (raw) stats.totalDailyMemories++;
+    }
   }
 
   // Thèmes sémantiques
