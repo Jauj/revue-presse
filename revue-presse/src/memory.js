@@ -35,6 +35,7 @@ export async function saveDailyMemory(env, date, reviewContent, articles) {
   const sources = [...new Set(articles.map(a => a.sourceName))];
   const keyFacts = extractKeyFacts(reviewContent);
   const actors = extractActors(reviewContent);
+  const entities = extractEntities(reviewContent);
 
   const memory = {
     date: dateStr,
@@ -42,6 +43,7 @@ export async function saveDailyMemory(env, date, reviewContent, articles) {
     sources,
     keyFacts,
     actors,
+    entities,
     articleCount: articles.length,
     sourceCount: sources.length,
     wordEstimate: reviewContent.split(/\s+/).length,
@@ -49,6 +51,10 @@ export async function saveDailyMemory(env, date, reviewContent, articles) {
   };
 
   await env.CACHE.put(key, JSON.stringify(memory), { expirationTtl: 30 * 24 * 3600 });
+
+  // Mettre à jour l'index des jours
+  await updateDayIndex(env, dateStr);
+
   return memory;
 }
 
@@ -810,55 +816,196 @@ function buildRichContextString(dailyMemories, semantic, narratives, distilled, 
 
 function extractThemesFromReview(reviewText) {
   const themes = [];
-  const sectionRegex = /\*\*([^*]{3,40})\*\*\s*[:：]/g;
+  const nonThemes = new Set([
+    "L'ESSENTIEL DU JOUR", "ANALYSE THÉMATIQUE", "TENDANCES",
+    "CHIFFRES CLÉS", "À SURVEILLER", "ESSENTIEL", "TENDANCES & PERSPECTIVES",
+    "SOMMAIRE", "POINTS DE TENSION", "SOURCES", "POUR ALLER PLUS LOIN",
+    "APPROFONDIR", "NOTE FINALE",
+  ]);
+
+  // Format éditorial : **1. Titre éditorial** ou **1. Titre : sous-titre**
+  const editorialRegex = /^\*\*(\d+)\.[\s]+(.+?)(?:\s*[:：]\s*(.+?))?\*\*$/gm;
   let match;
+  while ((match = editorialRegex.exec(reviewText)) !== null) {
+    const title = match[2].trim();
+    if (title.length > 5 && !nonThemes.has(title.toUpperCase())) {
+      themes.push(title);
+    }
+  }
+
+  // Format Smart Brevity legacy : **THÈME 1** suivi de :
+  const sectionRegex = /\*\*([^*\d]{3,40})\*\*\s*[:：]/g;
   while ((match = sectionRegex.exec(reviewText)) !== null) {
     const theme = match[1].trim();
-    const nonThemes = [
-      "L'ESSENTIEL DU JOUR", "ANALYSE THÉMATIQUE", "TENDANCES",
-      "CHIFFRES CLÉS", "À SURVEILLER", "ESSENTIEL", "TENDANCES & PERSPECTIVES",
-    ];
-    if (!nonThemes.some(nt => theme.toUpperCase().includes(nt.toUpperCase()))) {
+    if (!nonThemes.has(theme.toUpperCase()) && !themes.includes(theme)) {
       themes.push(theme);
     }
   }
 
-  const axiomRegex = /\*\*([^*]{2,20})\s*[:：]\*\*/g;
+  // Format axiom legacy : **Bold Axiom :**
+  const axiomRegex = /\*\*([^*]{2,25})\s*[:：]\*\*/g;
   while ((match = axiomRegex.exec(reviewText)) !== null) {
     const axiom = match[1].trim();
-    if (axiom.length > 3 && axiom.length < 25 && !themes.includes(axiom)) {
+    if (axiom.length > 3 && axiom.length < 25 && !nonThemes.has(axiom.toUpperCase()) && !themes.includes(axiom)) {
       themes.push(axiom);
     }
   }
 
-  return [...new Set(themes)].slice(0, 10);
+  return [...new Set(themes)].slice(0, 12);
 }
 
 function extractKeyFacts(reviewText) {
   const facts = [];
-  const factRegex = /^-\s+(.{30,200})$/gm;
+  const seen = new Set();
+
+  // 1. Lignes à puces substantielles (30-250 chars)
+  const bulletRegex = /^-\s+(.{30,250})$/gm;
   let match;
-  while ((match = factRegex.exec(reviewText)) !== null) {
+  while ((match = bulletRegex.exec(reviewText)) !== null) {
     const fact = match[1].trim();
-    if (/\d+/.test(fact)) facts.push(fact);
+    // Exclure les lignes qui sont juste des titres de sections ou des liens
+    if (!fact.startsWith('**') && !fact.startsWith('http') && !seen.has(fact.substring(0, 50))) {
+      facts.push(fact);
+      seen.add(fact.substring(0, 50));
+    }
   }
-  return facts.slice(0, 10);
+
+  // 2. Phrases avec des chiffres précis dans les paragraphes (signal de faits durs)
+  const numberRegex = /[^.!?]*(?:\d{2,}|\d+\s*(?:millions?|milliards?|%|morts?|blessés?|personnes|jours|ans))[^.!?]*[.!?]/gi;
+  while ((match = numberRegex.exec(reviewText)) !== null) {
+    const fact = match[0].trim();
+    if (fact.length > 30 && fact.length < 250 && !seen.has(fact.substring(0, 50))) {
+      facts.push(fact);
+      seen.add(fact.substring(0, 50));
+    }
+  }
+
+  return [...new Set(facts)].slice(0, 15);
 }
 
 function extractActors(reviewText) {
   const actors = new Set();
-  // Patterns communs : noms propres après "Selon", "D'après", en gras
-  const selonRegex = /(?:Selon|D'après)\s+\*\*([^*]{2,40})\*\*/g;
   let match;
+
+  // 1. Noms propres en gras (2+ mots commençant par majuscule)
+  const boldNameRegex = /\*\*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ]+(?:\s+[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ]+){0,3})\*\*/g;
+  while ((match = boldNameRegex.exec(reviewText)) !== null) {
+    const name = match[1].trim();
+    // Exclure les titres de sections (commençant par un chiffre ou trop longs)
+    if (!/^\d/.test(name) && name.length < 40 && name.split(/\s+/).length >= 2) {
+      actors.add(name);
+    }
+  }
+
+  // 2. Après « Selon », « D'après »
+  const selonRegex = /(?:Selon|D'après)\s+([^,.]{2,40})/gi;
   while ((match = selonRegex.exec(reviewText)) !== null) {
+    const name = match[1].trim();
+    // Garder si ça ressemble à un nom propre (majuscule au début)
+    if (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ]/.test(name) && name.length > 2) {
+      actors.add(name);
+    }
+  }
+
+  // 3. Noms propres entre guillemets suivis d'une source
+  const quoteActorRegex = /«\s*[^»]{10,200}\s*»\s*[—–-]\s*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ\s]{2,35})/g;
+  while ((match = quoteActorRegex.exec(reviewText)) !== null) {
     actors.add(match[1].trim());
   }
-  // Acteurs dans les sections thématiques (noms propres en gras)
-  const actorRegex = /\*\*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ\s]{2,30}(?:\s+(?:Macron|Barnier|Le Pen|Mélenchon|Scholz|Trump|Biden|Xi|Poutine|Starmer|Lula)))\*\*/g;
-  while ((match = actorRegex.exec(reviewText)) !== null) {
-    actors.add(match[1].trim());
+
+  // 4. Liste élargie de figures connues (pattern flexible)
+  const knownFigures = [
+    'Macron', 'Barnier', 'Le Pen', 'Mélenchon', 'Scholz', 'Trump', 'Biden',
+    'Xi', 'Poutine', 'Starmer', 'Lula', 'Milei', 'Zelensky', 'Netanyahu',
+    'Mitsotakis', 'Maréchal', 'Darmanin', 'Attal', 'Borne', 'Castex',
+    'Von der Leyen', 'Blinken', 'Lavrov', 'Khamenei', 'Modi', 'Meloni',
+  ];
+  for (const figure of knownFigures) {
+    if (reviewText.includes(figure)) actors.add(figure);
   }
-  return [...actors].slice(0, 10);
+
+  return [...actors].slice(0, 15);
+}
+
+// ============================================================
+// FONCTIONS INTERNES — Extraction d'entités (pays, orgs, lieux)
+// ============================================================
+
+function extractEntities(reviewText) {
+  const entities = { countries: new Set(), organizations: new Set(), places: new Set() };
+
+  // Pays (liste des principaux pays cités dans une revue de presse francophone)
+  const countries = [
+    'France', 'États-Unis', 'USA', 'Chine', 'Russie', 'Ukraine', 'Allemagne',
+    'Royaume-Uni', 'Grèce', 'Espagne', 'Italie', 'Argentine', 'Brésil', 'Venezuela',
+    'Iran', 'Israël', 'Palestine', 'Gaza', 'Cisjordanie', 'Liban', 'Syrie',
+    'Turquie', 'Inde', 'Japon', 'Corée', 'Maroc', 'Sénégal', 'Algérie',
+    'Tunisie', 'Mozambique', 'Pologne', 'Hongrie', 'Roumanie', 'Tchéquie',
+    'Moldavie', 'Géorgie', 'Arménie', 'Azerbaïdjan', 'Mali', 'Niger', 'Tchad',
+    'Sahel', 'Kanaky', 'Nouvelle-Calédonie', 'Taïwan', 'Colombie', 'Mexique',
+    'Cuba', 'Haïti', 'RD Congo', 'RDC', 'Égypte', 'Arabie Saoudite',
+  ];
+  for (const c of countries) {
+    if (reviewText.includes(c)) entities.countries.add(c);
+  }
+
+  // Organisations
+  const orgs = [
+    'UE', 'Union européenne', 'OTAN', 'ONU', 'FMI', 'Banque mondiale',
+    'Banque centrale', 'BCE', 'Fed', 'G7', 'G20', 'OCI',
+    'Parlement européen', 'Commission européenne', 'Conseil européen',
+    'Assemblée nationale', 'Sénat', 'Conseil constitutionnel',
+    'Cour internationale de justice', 'CIJ', 'CPI', 'Cour pénale',
+    'Amnesty International', 'Human Rights Watch', 'MSF', 'Croix-Rouge',
+    'TotalEnergies', 'EDF', 'Airbus', 'LVMH',
+    'Front national', 'Rassemblement national', 'RN', 'LFI',
+    'France Insoumise', 'EELV', 'Nupes', 'Nouvelle-Démocratie',
+    'Union européenne', 'Hamas', 'Hezbollah', 'OTAN',
+  ];
+  for (const o of orgs) {
+    if (reviewText.includes(o)) entities.organizations.add(o);
+  }
+
+  return {
+    countries: [...entities.countries].slice(0, 10),
+    organizations: [...entities.organizations].slice(0, 10),
+    places: [...entities.places].slice(0, 5),
+  };
+}
+
+/**
+ * Stocke le score de qualité d'une revue (issu du STAGE4)
+ * KV: memory:quality:YYYY-MM-DD  (TTL 90j)
+ */
+export async function saveQualityScore(env, dateStr, score, reviewContent) {
+  const key = `${MEM_PREFIX}quality:${dateStr}`;
+  await env.CACHE.put(key, JSON.stringify({
+    date: dateStr,
+    score,
+    wordCount: reviewContent.split(/\s+/).length,
+    themesCount: (reviewContent.match(/^\*\*\d+\./gm) || []).length,
+    hasPointsDeTension: reviewContent.includes('Points de tension'),
+    hasSurveiller: reviewContent.includes('À surveiller'),
+    createdAt: new Date().toISOString(),
+  }), { expirationTtl: 90 * 24 * 3600 });
+}
+
+/**
+ * Met à jour l'index des jours avec mémoires (optimisation KV)
+ * KV: memory:day_index  (TTL 365j)
+ */
+async function updateDayIndex(env, dateStr) {
+  const key = `${MEM_PREFIX}day_index`;
+  const raw = await env.CACHE.get(key);
+  let index = raw ? JSON.parse(raw) : { days: [] };
+  if (!index.days.includes(dateStr)) {
+    index.days.push(dateStr);
+    index.days.sort();
+    // Garder max 60 jours
+    index.days = index.days.slice(-60);
+    await env.CACHE.put(key, JSON.stringify(index), { expirationTtl: 365 * 24 * 3600 });
+  }
+  return index;
 }
 
 function normalizeTheme(theme) {

@@ -410,7 +410,7 @@ export async function stage2_theme(extraction, articles, env) {
  * ÉTAPE 3 : Rédaction du brouillon Smart Brevity
  * (optionnellement enrichi par recherche web)
  */
-export async function stage3_draft(themes, articles, env, webResearch = null) {
+export async function stage3_draft(themes, articles, env, webResearch = null, memoryContext = null) {
   const xml = buildArticlesXML(articles);
 
   let userPrompt = `Voici le regroupement thématique :\n\n${themes}\n\n---\n\nArticles originaux :\n${xml}`;
@@ -423,6 +423,11 @@ export async function stage3_draft(themes, articles, env, webResearch = null) {
       userPrompt += `[${item.source || 'Web'}] ${item.title}\n`;
       userPrompt += `${(item.snippet || item.content || '').substring(0, 300)}\n\n`;
     }
+  }
+
+  // Injecter le contexte mémoire éditoriale si disponible
+  if (memoryContext) {
+    userPrompt += `\n\n---\n\n${memoryContext}\n`;
   }
 
   const result = await callAI(env, STAGE3_PROMPT, userPrompt, true);

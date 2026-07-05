@@ -1,15 +1,17 @@
 // ============================================================
-// index.js — Point d'entrée Cloudflare Worker v3.1
-// 8 phases CoT : FETCH → FILTER → EXTRACT → THEME → DRAFT →
-//   REVIEW → SYNTHESIS → DELIVER
+// index.js — Point d'entrée Cloudflare Worker v3.4
+// 8 phases CoT + Mémoire éditoriale
+// FETCH → FILTER → EXTRACT → THEME → DRAFT →
+//   REVIEW → SYNTHESIS → DELIVER + MEMORY SAVE
 // ============================================================
 
 import {
   phaseFetch, phaseFilter, phaseExtract, phaseTheme, phaseDraft,
   phaseReview, phaseSynthesis, phaseDeliver, getStatus,
 } from './pipeline.js';
+import { getMemoryStats, dreamDistill } from './memory.js';
 
-const VERSION = '3.2.0';
+const VERSION = '3.4.0';
 
 export default {
   async scheduled(event, env, ctx) {
@@ -135,6 +137,33 @@ export default {
         }), { headers: cors });
       }
 
+      // GET /memory/stats — Statistiques du système de mémoire
+      if (path === '/memory/stats' && request.method === 'GET') {
+        const stats = await getMemoryStats(env);
+        return new Response(JSON.stringify({ version: VERSION, memory: stats }), { headers: cors });
+      }
+
+      // POST /trigger/dream — Déclencher la distillation (rêve) manuellement
+      if (path === '/trigger/dream' && request.method === 'POST') {
+        const result = await dreamDistill(env, 14, true);
+        return new Response(JSON.stringify({ triggered: 'dream', version: VERSION, ...result }), { headers: cors });
+      }
+
+      // POST /feedback — Feedback utilisateur sur la revue
+      if (path === '/feedback' && request.method === 'POST') {
+        const body = await request.json();
+        const { date, type, comment } = body;
+        if (!date || !type) {
+          return new Response(JSON.stringify({ error: 'Paramètres manquants: date, type requis' }), { status: 400, headers: cors });
+        }
+        const feedbackKey = `memory:feedback:${date}`;
+        const existing = await env.CACHE.get(feedbackKey);
+        const feedbacks = existing ? JSON.parse(existing) : [];
+        feedbacks.push({ type, comment: comment || '', createdAt: new Date().toISOString() });
+        await env.CACHE.put(feedbackKey, JSON.stringify(feedbacks), { expirationTtl: 365 * 24 * 3600 });
+        return new Response(JSON.stringify({ ok: true, feedbackCount: feedbacks.length }), { headers: cors });
+      }
+
       return new Response(JSON.stringify({
         error: 'Route non trouvée',
         version: VERSION,
@@ -152,6 +181,9 @@ export default {
           'POST /trigger/all': 'Pipeline complet (test)',
           'GET /test/search?q=...': 'Test recherche web',
           'GET /test/apis': 'Test News APIs',
+          'GET /memory/stats': 'Statistiques mémoire éditoriale',
+          'POST /trigger/dream': 'Déclencher la distillation IA',
+          'POST /feedback': 'Feedback utilisateur {date, type, comment}',
         },
       }), { status: 404, headers: cors });
 
@@ -175,6 +207,7 @@ async function runPhase(name, env, eventTime) {
     case 'review': return phaseReview(env, eventTime);
     case 'synthesis': return phaseSynthesis(env, eventTime);
     case 'deliver': return phaseDeliver(env, eventTime);
+    case 'dream': return dreamDistill(env, 14, true);
     default: return { success: false, error: `Phase inconnue: ${name}` };
   }
 }

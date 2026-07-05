@@ -16,7 +16,7 @@ export function buildEmailHTML(review, articles, date, provider) {
     day: 'numeric',
     timeZone: 'Europe/Paris',
   });
-
+  const dateISO = date.toISOString().split('T')[0];
   const articleCount = articles.length;
   const sourceCount = [...new Set(articles.map(a => a.sourceName))].length;
 
@@ -80,6 +80,9 @@ export function buildEmailHTML(review, articles, date, provider) {
     </div>
     <div class="footer">
       Revue de Presse éditoriale — Cloudflare Workers — ${dateStr}
+      <br><span style="font-size:11px;color:#bbb">
+        <a href="https://revue-presse.jeanneaj.workers.dev/feedback" style="color:#bbb">Ce contenu vous est-il utile ?</a>
+      </span>
     </div>
   </div>
 </body>

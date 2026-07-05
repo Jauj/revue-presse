@@ -10,6 +10,7 @@ import { filterAndSelect } from './filter.js';
 import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
 import { webSearchMultiLang } from './searcher.js';
 import { buildEmailHTML, buildEmailText, buildSubject, sendEmail } from './email.js';
+import { saveDailyMemory, updateSemanticMemory, updateNarratives, getMemoryContext, dreamDistill, saveQualityScore } from './memory.js';
 
 // Clés KV pour le bus inter-phases
 const KV_RAW_ARTICLES = 'pipeline:raw_articles';      // après FETCH (brut, non dédupliqué)
@@ -295,19 +296,33 @@ export async function phaseDraft(env, eventTime) {
     status.research = { queries: searchQueries.slice(0, 1), found: webResearch.length, details: webResearch.map(r => ({ title: r.title?.substring(0, 60), source: r.source })) };
     console.log(`[Phase Draft] Recherche web: ${webResearch.length} résultats complémentaires`);
 
+    // === MÉMOIRE : récupérer le contexte éditorial long terme ===
+    status.step = 'memory_context';
+    let memoryContext = null;
+    try {
+      memoryContext = await getMemoryContext(env, 7);
+      if (memoryContext) {
+        console.log(`[Phase Draft] Mémoire injectée (${memoryContext.length} chars)`);
+      }
+    } catch (err) {
+      console.warn(`[Phase Draft] Mémoire indisponible: ${err.message}`);
+    }
+
     status.step = 'ai_draft';
-    const result = await stage3_draft(themes, articles, env, webResearch);
+    const result = await stage3_draft(themes, articles, env, webResearch, memoryContext);
 
     await env.CACHE.put(KV_DRAFT, JSON.stringify({
       date: eventTime.toISOString(),
       content: result.content,
       provider: result.provider,
       research: status.research,
+      memoryInjected: !!memoryContext,
     }), { expirationTtl: 7200 });
 
     status.success = true;
     status.provider = result.provider;
     status.outputLength = result.content.length;
+    status.memoryInjected = !!memoryContext;
 
   } catch (err) {
     status.success = false;
@@ -355,7 +370,7 @@ export async function phaseReview(env, eventTime) {
 }
 
 // ============================================================
-// PHASE 7 — ÉTAPE 5 IA : Synthèse EIC (2 appels espacés de 3s)
+// PHASE 7 — ÉTAPE 5 IA : Synthèse EIC + sauvegarde mémoire
 // ============================================================
 export async function phaseSynthesis(env, eventTime) {
   const status = { phase: 'synthesis', startedAt: eventTime.toISOString(), step: 'kv_read' };
@@ -380,6 +395,30 @@ export async function phaseSynthesis(env, eventTime) {
       meta,
       cotStages: ['extraction', 'theming', 'drafting', 'review', 'synthesis'],
     }), { expirationTtl: 7200 });
+
+    // === MÉMOIRE : sauvegarder la revue du jour ===
+    status.step = 'memory_save';
+    try {
+      const dateStr = eventTime.toISOString().split('T')[0];
+      const dailyMemory = await saveDailyMemory(env, eventTime, result.content, articles);
+      await updateSemanticMemory(env, dailyMemory);
+      await updateNarratives(env, dailyMemory);
+
+      // Extraire le score qualité depuis la review (STAGE4)
+      const scoreMatch = review.match(/<score_global>(\d+(?:\.\d+)?)<\/score_global>/);
+      if (scoreMatch) {
+        await saveQualityScore(env, dateStr, parseFloat(scoreMatch[1]), result.content);
+      }
+
+      status.memorySaved = true;
+      status.memoryThemes = dailyMemory.themes.length;
+      status.memoryActors = dailyMemory.actors.length;
+      console.log(`[Phase Synthesis] Mémoire sauvegardée: ${dailyMemory.themes.length} thèmes, ${dailyMemory.actors.length} acteurs`);
+    } catch (memErr) {
+      console.warn(`[Phase Synthesis] Erreur mémoire (non bloquante): ${memErr.message}`);
+      status.memorySaved = false;
+      status.memoryError = memErr.message;
+    }
 
     status.success = true;
     status.provider = result.provider;
