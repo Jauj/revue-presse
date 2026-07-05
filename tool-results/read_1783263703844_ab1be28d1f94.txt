@@ -1,0 +1,534 @@
+   501→   501→   501→// FONCTIONS INTERNES — Construction du matériel de rêve
+   502→   502→   502→// ============================================================
+   503→   503→   503→
+   504→   504→   504→function buildDreamMaterial(dailyMemories, narratives) {
+   505→   505→   505→  let material = `## MATÉRIEL DE RÊVE — ${dailyMemories.length} jours de mémoires\n\n`;
+   506→   506→   506→
+   507→   507→   507→  // Résumé chronologique compact
+   508→   508→   508→  material += '### Chronologie (du plus ancien au plus récent)\n';
+   509→   509→   509→  for (const mem of dailyMemories) {
+   510→   510→   510→    const themesStr = mem.themes.slice(0, 3).join(' | ');
+   511→   511→   511→    material += `- ${mem.date}: ${themesStr} (${mem.articleCount} articles, ${mem.sourceCount} sources)\n`;
+   512→   512→   512→  }
+   513→   513→   513→
+   514→   514→   514→  // Thèmes avec fréquence
+   515→   515→   515→  const themeFreq = {};
+   516→   516→   516→  for (const mem of dailyMemories) {
+   517→   517→   517→    for (const t of mem.themes) {
+   518→   518→   518→      const norm = normalizeTheme(t);
+   519→   519→   519→      themeFreq[norm] = (themeFreq[norm] || 0) + 1;
+   520→   520→   520→    }
+   521→   521→   521→  }
+   522→   522→   522→  const frequent = Object.entries(themeFreq)
+   523→   523→   523→    .sort((a, b) => b[1] - a[1])
+   524→   524→   524→    .slice(0, 12);
+   525→   525→   525→
+   526→   526→   526→  material += '\n### Thèmes par fréquence\n';
+   527→   527→   527→  for (const [key, count] of frequent) {
+   528→   528→   528→    const bar = '█'.repeat(Math.min(count, 10));
+   529→   529→   529→    material += `- ${key.replace(/_/g, ' ')} : ${bar} (${count}/${dailyMemories.length} jours)\n`;
+   530→   530→   530→  }
+   531→   531→   531→
+   532→   532→   532→  // Sources les plus présentes
+   533→   533→   533→  const sourceFreq = {};
+   534→   534→   534→  for (const mem of dailyMemories) {
+   535→   535→   535→    for (const s of mem.sources) {
+   536→   536→   536→      sourceFreq[s] = (sourceFreq[s] || 0) + 1;
+   537→   537→   537→    }
+   538→   538→   538→  }
+   539→   539→   539→  const topSources = Object.entries(sourceFreq)
+   540→   540→   540→    .sort((a, b) => b[1] - a[1])
+   541→   541→   541→    .slice(0, 8);
+   542→   542→   542→
+   543→   543→   543→  material += '\n### Sources les plus citées\n';
+   544→   544→   544→  for (const [source, count] of topSources) {
+   545→   545→   545→    material += `- ${source} : présente ${count}/${dailyMemories.length} jours\n`;
+   546→   546→   546→  }
+   547→   547→   547→
+   548→   548→   548→  // Faits clés par jour
+   549→   549→   549→  material += '\n### Faits marquants par jour\n';
+   550→   550→   550→  for (const mem of dailyMemories.slice(-5)) {
+   551→   551→   551→    material += `\n**${mem.date}**\n`;
+   552→   552→   552→    for (const fact of mem.keyFacts.slice(0, 3)) {
+   553→   553→   553→      material += `  - ${fact}\n`;
+   554→   554→   554→    }
+   555→   555→   555→  }
+   556→   556→   556→
+   557→   557→   557→  // Narratives actives
+   558→   558→   558→  if (narratives?.active?.length > 0) {
+   559→   559→   559→    material += '\n### Narratives en cours\n';
+   560→   560→   560→    for (const nar of narratives.active.slice(0, 5)) {
+   561→   561→   561→      material += `- **${nar.title}** : ${nar.dayCount} jours, dernier le ${nar.lastSeen}\n`;
+   562→   562→   562→      if (nar.facts?.length > 0) {
+   563→   563→   563→        material += `  Évolution: ${nar.facts[nar.facts.length - 1].fact}\n`;
+   564→   564→   564→      }
+   565→   565→   565→    }
+   566→   566→   566→  }
+   567→   567→   567→
+   568→   568→   568→  // Acteurs récurrents
+   569→   569→   569→  const actorFreq = {};
+   570→   570→   570→  for (const mem of dailyMemories) {
+   571→   571→   571→    if (mem.actors) {
+   572→   572→   572→      for (const a of mem.actors) {
+   573→   573→   573→        actorFreq[a] = (actorFreq[a] || 0) + 1;
+   574→   574→   574→      }
+   575→   575→   575→    }
+   576→   576→   576→  }
+   577→   577→   577→  const topActors = Object.entries(actorFreq)
+   578→   578→   578→    .sort((a, b) => b[1] - a[1])
+   579→   579→   579→    .slice(0, 8);
+   580→   580→   580→
+   581→   581→   581→  if (topActors.length > 0) {
+   582→   582→   582→    material += '\n### Acteurs récurrents\n';
+   583→   583→   583→    for (const [actor, count] of topActors) {
+   584→   584→   584→      material += `- ${actor} : ${count} mentions\n`;
+   585→   585→   585→    }
+   586→   586→   586→  }
+   587→   587→   587→
+   588→   588→   588→  return material;
+   589→   589→   589→}
+   590→   590→   590→
+   591→   591→   591→// ============================================================
+   592→   592→   592→// FONCTIONS INTERNES — Appel IA de rêve
+   593→   593→   593→// ============================================================
+   594→   594→   594→
+   595→   595→   595→const DREAM_PROMPT = `Tu es un système de "rêve" pour une revue de presse automatique. Tu analyses ${'${days}'} jours de mémoires éditoriales pour en extraire des connaissances de haut niveau.
+   596→   596→   596→
+   597→   597→   597→## TA MISSION
+   598→   598→   598→Produis un JSON STRICT avec cette structure exacte (pas de markdown, pas de commentaires) :
+   599→   599→   599→{
+   600→   600→   600→  "patterns": [
+   601→   601→   601→    {"type": "recurring", "theme": "nom du thème", "frequency": "X/N jours", "trend": "rising|stable|declining", "note": "explication courte"}
+   602→   602→   602→  ],
+   603→   603→   603→  "narratives": [
+   604→   604→   604→    {"title": "titre du récit", "arc": "description de l'évolution sur la période", "key_moments": ["moment 1", "moment 2"], "status": "active|peaked|resolved"}
+   605→   605→   605→  ],
+   606→   606→   606→  "insights": [
+   607→   607→   607→    "insight 1 : observation profonde sur les tendances",
+   608→   608→   608→    "insight 2 : corrélation inattendue entre sujets"
+   609→   609→   609→  ],
+   610→   610→   610→  "source_dynamics": [
+   611→   611→   611→    {"source": "nom source", "role": "leader/follower/specialized", "notes": "comment cette source se comporte"}
+   612→   612→   612→  ],
+   613→   613→   613→  "blind_spots": [
+   614→   614→   614→    "angle ou sujet rarement couvert"
+   615→   615→   615→  ],
+   616→   616→   616→  "macro_trends": [
+   617→   617→   617→    {"trend": "nom de la tendance macro", "description": "explication", "timescale": "court/moyen/long terme"}
+   618→   618→   618→  ]
+   619→   619→   619→}
+   620→   620→   620→
+   621→   621→   621→## RÈGLES
+   622→   622→   622→- Réponse JSON UNIQUEMENT, pas de texte avant ou après
+   623→   623→   623→- Sois précis et factuel, basé uniquement sur les données fournies
+   624→   624→   624→- Les insights doivent être non-évidents (pas juste "le thème X est fréquent")
+   625→   625→   625→- Identifie les corrélations et les évolutions, pas juste les occurrences
+   626→   626→   626→- Maximum 6 patterns, 4 narratives, 5 insights, 5 source_dynamics, 3 blind_spots, 4 macro_trends`;
+   627→   627→   627→
+   628→   628→   628→async function callAIDream(env, dreamMaterial) {
+   629→   629→   629→  const userPrompt = `Voici le matériel de rêve : ${dreamMaterial}\n\nProduis le JSON de distillation.`;
+   630→   630→   630→
+   631→   631→   631→  try {
+   632→   632→   632→    const result = await callAI(env, DREAM_PROMPT, userPrompt, false);
+   633→   633→   633→    // Parser le JSON de la réponse
+   634→   634→   634→    let jsonStr = result.trim();
+   635→   635→   635→    // Enlever les blocs code markdown si présents
+   636→   636→   636→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   637→   637→   637→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   638→   638→   638→    // Enlever les lignes qui ne sont pas du JSON
+   639→   639→   639→    if (!jsonStr.startsWith('{')) {
+   640→   640→   640→      const firstBrace = jsonStr.indexOf('{');
+   641→   641→   641→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   642→   642→   642→    }
+   643→   643→   643→
+   644→   644→   644→    const parsed = JSON.parse(jsonStr);
+   645→   645→   645→    return {
+   646→   646→   646→      ...parsed,
+   647→   647→   647→      aiGenerated: true,
+   648→   648→   648→      generatedAt: new Date().toISOString(),
+   649→   649→   649→    };
+   650→   650→   650→  } catch (err) {
+   651→   651→   651→    console.error(`Dream AI parse error: ${err.message}`);
+   652→   652→   652→    throw err;
+   653→   653→   653→  }
+   654→   654→   654→}
+   655→   655→   655→
+   656→   656→   656→// ============================================================
+   657→   657→   657→// FONCTIONS INTERNES — Distillation rule-based (fallback)
+   658→   658→   658→// ============================================================
+   659→   659→   659→
+   660→   660→   660→function ruleBasedDistillation(dailyMemories, narratives) {
+   661→   661→   661→  // Patterns récurrents
+   662→   662→   662→  const themeFreq = {};
+   663→   663→   663→  for (const mem of dailyMemories) {
+   664→   664→   664→    for (const t of mem.themes) {
+   665→   665→   665→      const norm = normalizeTheme(t);
+   666→   666→   666→      themeFreq[norm] = (themeFreq[norm] || 0) + 1;
+   667→   667→   667→    }
+   668→   668→   668→  }
+   669→   669→   669→
+   670→   670→   670→  const patterns = Object.entries(themeFreq)
+   671→   671→   671→    .sort((a, b) => b[1] - a[1])
+   672→   672→   672→    .slice(0, 6)
+   673→   673→   673→    .map(([key, count]) => ({
+   674→   674→   674→      type: 'recurring',
+   675→   675→   675→      theme: key.replace(/_/g, ' '),
+   676→   676→   676→      frequency: `${count}/${dailyMemories.length} jours`,
+   677→   677→   677→      trend: count > dailyMemories.length * 0.5 ? 'stable' : 'emerging',
+   678→   678→   678→      note: `Présent ${count} jours sur ${dailyMemories.length}`,
+   679→   679→   679→    }));
+   680→   680→   680→
+   681→   681→   681→  // Narratives depuis la mémoire narratives
+   682→   682→   682→  const narList = (narratives?.active || []).slice(0, 4).map(n => ({
+   683→   683→   683→    title: n.title,
+   684→   684→   684→    arc: `${n.dayCount} jours d'évolution`,
+   685→   685→   685→    key_moments: n.facts?.slice(-2).map(f => f.fact) || [],
+   686→   686→   686→    status: n.dayCount >= 5 ? 'peaked' : 'active',
+   687→   687→   687→  }));
+   688→   688→   688→
+   689→   689→   689→  // Source dynamics
+   690→   690→   690→  const sourceFreq = {};
+   691→   691→   691→  for (const mem of dailyMemories) {
+   692→   692→   692→    for (const s of mem.sources) {
+   693→   693→   693→      sourceFreq[s] = (sourceFreq[s] || 0) + 1;
+   694→   694→   694→    }
+   695→   695→   695→  }
+   696→   696→   696→  const sourceDynamics = Object.entries(sourceFreq)
+   697→   697→   697→    .sort((a, b) => b[1] - a[1])
+   698→   698→   698→    .slice(0, 5)
+   699→   699→   699→    .map(([source, count]) => ({
+   700→   700→   700→      source,
+   701→   701→   701→      role: count > dailyMemories.length * 0.7 ? 'leader' : 'contributor',
+   702→   702→   702→      notes: `Présent ${count} jours`,
+   703→   703→   703→    }));
+   704→   704→   704→
+   705→   705→   705→  return {
+   706→   706→   706→    patterns,
+   707→   707→   707→    narratives: narList,
+   708→   708→   708→    insights: [],
+   709→   709→   709→    source_dynamics: sourceDynamics,
+   710→   710→   710→    blind_spots: [],
+   711→   711→   711→    macro_trends: [],
+   712→   712→   712→    aiGenerated: false,
+   713→   713→   713→    generatedAt: new Date().toISOString(),
+   714→   714→   714→  };
+   715→   715→   715→}
+   716→   716→   716→
+   717→   717→   717→// ============================================================
+   718→   718→   718→// FONCTIONS INTERNES — Construction du contexte riche pour CoT
+   719→   719→   719→// ============================================================
+   720→   720→   720→
+   721→   721→   721→function buildRichContextString(dailyMemories, semantic, narratives, distilled, editorial) {
+   722→   722→   722→  let context = '## CONTEXTE MÉMOIRE (mémoire éditoriale long terme)\n\n';
+   723→   723→   723→
+   724→   724→   724→  // 1. Narratives actives (priorité haute — fil rouge)
+   725→   725→   725→  if (narratives?.active?.length > 0) {
+   726→   726→   726→    context += '### Récits en cours (narratives)\n';
+   727→   727→   727→    context += 'Ces histoires traversent plusieurs jours. Situe l\'actualité du jour par rapport à ces récits :\n\n';
+   728→   728→   728→    for (const nar of narratives.active.slice(0, 4)) {
+   729→   729→   729→      const statusIcon = nar.dayCount >= 5 ? '🔴' : nar.dayCount >= 3 ? '🟡' : '🟢';
+   730→   730→   730→      context += `${statusIcon} **${nar.title}** (${nar.dayCount} jours, dernier: ${nar.lastSeen})\n`;
+   731→   731→   731→      if (nar.facts?.length > 0) {
+   732→   732→   732→        const lastFact = nar.facts[nar.facts.length - 1];
+   733→   733→   733→        context += `  Dernière évolution: ${lastFact.fact}\n`;
+   734→   734→   734→      }
+   735→   735→   735→    }
+   736→   736→   736→    context += '\n';
+   737→   737→   737→  }
+   738→   738→   738→
+   739→   739→   739→  // 2. Connaissances distillées (insights de haut niveau)
+   740→   740→   740→  if (distilled) {
+   741→   741→   741→    if (distilled.insights?.length > 0) {
+   742→   742→   742→      context += '### Connaissances consolidées (rêve)\n';
+   743→   743→   743→      context += 'Patterns identifiés par analyse croisée des jours précédents :\n\n';
+   744→   744→   744→      for (const insight of distilled.insights.slice(0, 4)) {
+   745→   745→   745→        context += `- 💡 ${insight}\n`;
+   746→   746→   746→      }
+   747→   747→   747→      context += '\n';
+   748→   748→   748→    }
+   749→   749→   749→
+   750→   750→   750→    if (distilled.macro_trends?.length > 0) {
+   751→   751→   751→      context += '### Tendances macro\n';
+   752→   752→   752→      for (const trend of distilled.macro_trends.slice(0, 3)) {
+   753→   753→   753→        context += `- 📈 **${trend.trend}** : ${trend.description}\n`;
+   754→   754→   754→      }
+   755→   755→   755→      context += '\n';
+   756→   756→   756→    }
+   757→   757→   757→
+   758→   758→   758→    if (distilled.blind_spots?.length > 0) {
+   759→   759→   759→      context += '### Angles morts détectés\n';
+   760→   760→   760→      for (const bs of distilled.blind_spots.slice(0, 2)) {
+   761→   761→   761→        context += `- ⚠️ ${bs}\n`;
+   762→   762→   762→      }
+   763→   763→   763→      context += '\n';
+   764→   764→   764→    }
+   765→   765→   765→  }
+   766→   766→   766→
+   767→   767→   767→  // 3. Thèmes sémantiques récurrents
+   768→   768→   768→  if (semantic && Object.keys(semantic.themes).length > 0) {
+   769→   769→   769→    context += '### Thèmes récurrents\n';
+   770→   770→   770→    const sorted = Object.entries(semantic.themes)
+   771→   771→   771→      .sort((a, b) => b[1].count - a[1].count)
+   772→   772→   772→      .slice(0, 6);
+   773→   773→   773→
+   774→   774→   774→    for (const [key, data] of sorted) {
+   775→   775→   775→      const trend = data.count > 5 ? 'récurrent' : data.count > 2 ? 'émergent' : 'nouveau';
+   776→   776→   776→      const trendIcon = data.count > 5 ? '🔴' : data.count > 2 ? '🟡' : '🟢';
+   777→   777→   777→      context += `${trendIcon} **${data.name}** (${data.count}j, ${trend})\n`;
+   778→   778→   778→    }
+   779→   779→   779→    context += '\n';
+   780→   780→   780→  }
+   781→   781→   781→
+   782→   782→   782→  // 4. Mémoire épisodique récente (derniers 3 jours, compact)
+   783→   783→   783→  if (dailyMemories.length > 0) {
+   784→   784→   784→    context += '### Revues récentes (derniers jours)\n';
+   785→   785→   785→    for (const mem of dailyMemories.slice(0, 3)) {
+   786→   786→   786→      const themesStr = mem.themes.slice(0, 3).join(', ') || 'sans thème';
+   787→   787→   787→      context += `- **${mem.date}** : ${themesStr} (${mem.articleCount} articles)\n`;
+   788→   788→   788→    }
+   789→   789→   789→    context += '\n';
+   790→   790→   790→  }
+   791→   791→   791→
+   792→   792→   792→  // 5. Préférences éditoriales apprises
+   793→   793→   793→  if (editorial?.preferences?.length > 0) {
+   794→   794→   794→    context += '### Préférences apprises\n';
+   795→   795→   795→    for (const pref of editorial.preferences.slice(0, 3)) {
+   796→   796→   796→      context += `- 📝 ${pref.insight}\n`;
+   797→   797→   797→    }
+   798→   798→   798→    context += '\n';
+   799→   799→   799→  }
+   800→   800→   800→
+   801→   801→   801→  // Instructions pour l'IA
+   802→   802→   802→  context += '### Instructions d\'utilisation de la mémoire\n';
+   803→   803→   803→  context += '- Si un sujet fait partie d\'une NARRATIVE en cours, situe l\'évolution dans le récit\n';
+   804→   804→   804→  context += '- Mentionne les TENDANCES MACRO quand l\'actualité du jour s\'inscrit dans ce cadre\n';
+   805→   805→   805→  context += '- Pour les thèmes RÉCURRENTS, indique si c\'est une continuité ou un changement\n';
+   806→   806→   806→  context += '- Si l\'actualité touche un ANGLE MORT identifié, accorde-lui une attention particulière\n';
+   807→   807→   807→  context += '- Ne répète PAS les informations déjà détaillées les jours précédents sauf évolution significative\n';
+   808→   808→   808→  context += '- Les CONNAISSANCES CONSOLIDÉES sont des patterns fiables — utilise-les pour enrichir l\'analyse\n';
+   809→   809→   809→
+   810→   810→   810→  return context;
+   811→   811→   811→}
+   812→   812→   812→
+   813→   813→   813→// ============================================================
+   814→   814→   814→// FONCTIONS INTERNES — Extraction depuis le texte de revue
+   815→   815→   815→// ============================================================
+   816→   816→   816→
+   817→   817→   817→function extractThemesFromReview(reviewText) {
+   818→   818→   818→  const themes = [];
+   819→   819→   819→  const nonThemes = new Set([
+   820→   820→   820→    "L'ESSENTIEL DU JOUR", "ANALYSE THÉMATIQUE", "TENDANCES",
+   821→   821→   821→    "CHIFFRES CLÉS", "À SURVEILLER", "ESSENTIEL", "TENDANCES & PERSPECTIVES",
+   822→   822→   822→    "SOMMAIRE", "POINTS DE TENSION", "SOURCES", "POUR ALLER PLUS LOIN",
+   823→   823→   823→    "APPROFONDIR", "NOTE FINALE",
+   824→   824→   824→  ]);
+   825→   825→   825→
+   826→   826→   826→  // Format éditorial : **1. Titre éditorial** ou **1. Titre : sous-titre**
+   827→   827→   827→  const editorialRegex = /^\*\*(\d+)\.[\s]+(.+?)(?:\s*[:：]\s*(.+?))?\*\*$/gm;
+   828→   828→   828→  let match;
+   829→   829→   829→  while ((match = editorialRegex.exec(reviewText)) !== null) {
+   830→   830→   830→    const title = match[2].trim();
+   831→   831→   831→    if (title.length > 5 && !nonThemes.has(title.toUpperCase())) {
+   832→   832→   832→      themes.push(title);
+   833→   833→   833→    }
+   834→   834→   834→  }
+   835→   835→   835→
+   836→   836→   836→  // Format Smart Brevity legacy : **THÈME 1** suivi de :
+   837→   837→   837→  const sectionRegex = /\*\*([^*\d]{3,40})\*\*\s*[:：]/g;
+   838→   838→   838→  while ((match = sectionRegex.exec(reviewText)) !== null) {
+   839→   839→   839→    const theme = match[1].trim();
+   840→   840→   840→    if (!nonThemes.has(theme.toUpperCase()) && !themes.includes(theme)) {
+   841→   841→   841→      themes.push(theme);
+   842→   842→   842→    }
+   843→   843→   843→  }
+   844→   844→   844→
+   845→   845→   845→  // Format axiom legacy : **Bold Axiom :**
+   846→   846→   846→  const axiomRegex = /\*\*([^*]{2,25})\s*[:：]\*\*/g;
+   847→   847→   847→  while ((match = axiomRegex.exec(reviewText)) !== null) {
+   848→   848→   848→    const axiom = match[1].trim();
+   849→   849→   849→    if (axiom.length > 3 && axiom.length < 25 && !nonThemes.has(axiom.toUpperCase()) && !themes.includes(axiom)) {
+   850→   850→   850→      themes.push(axiom);
+   851→   851→   851→    }
+   852→   852→   852→  }
+   853→   853→   853→
+   854→   854→   854→  return [...new Set(themes)].slice(0, 12);
+   855→   855→   855→}
+   856→   856→   856→
+   857→   857→   857→function extractKeyFacts(reviewText) {
+   858→   858→   858→  const facts = [];
+   859→   859→   859→  const seen = new Set();
+   860→   860→   860→
+   861→   861→   861→  // 1. Lignes à puces substantielles (30-250 chars)
+   862→   862→   862→  const bulletRegex = /^-\s+(.{30,250})$/gm;
+   863→   863→   863→  let match;
+   864→   864→   864→  while ((match = bulletRegex.exec(reviewText)) !== null) {
+   865→   865→   865→    const fact = match[1].trim();
+   866→   866→   866→    // Exclure les lignes qui sont juste des titres de sections ou des liens
+   867→   867→   867→    if (!fact.startsWith('**') && !fact.startsWith('http') && !seen.has(fact.substring(0, 50))) {
+   868→   868→   868→      facts.push(fact);
+   869→   869→   869→      seen.add(fact.substring(0, 50));
+   870→   870→   870→    }
+   871→   871→   871→  }
+   872→   872→   872→
+   873→   873→   873→  // 2. Phrases avec des chiffres précis dans les paragraphes (signal de faits durs)
+   874→   874→   874→  const numberRegex = /[^.!?]*(?:\d{2,}|\d+\s*(?:millions?|milliards?|%|morts?|blessés?|personnes|jours|ans))[^.!?]*[.!?]/gi;
+   875→   875→   875→  while ((match = numberRegex.exec(reviewText)) !== null) {
+   876→   876→   876→    const fact = match[0].trim();
+   877→   877→   877→    if (fact.length > 30 && fact.length < 250 && !seen.has(fact.substring(0, 50))) {
+   878→   878→   878→      facts.push(fact);
+   879→   879→   879→      seen.add(fact.substring(0, 50));
+   880→   880→   880→    }
+   881→   881→   881→  }
+   882→   882→   882→
+   883→   883→   883→  return [...new Set(facts)].slice(0, 15);
+   884→   884→   884→}
+   885→   885→   885→
+   886→   886→   886→function extractActors(reviewText) {
+   887→   887→   887→  const actors = new Set();
+   888→   888→   888→  let match;
+   889→   889→   889→
+   890→   890→   890→  // 1. Noms propres en gras (2+ mots commençant par majuscule)
+   891→   891→   891→  const boldNameRegex = /\*\*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ]+(?:\s+[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ]+){0,3})\*\*/g;
+   892→   892→   892→  while ((match = boldNameRegex.exec(reviewText)) !== null) {
+   893→   893→   893→    const name = match[1].trim();
+   894→   894→   894→    // Exclure les titres de sections (commençant par un chiffre ou trop longs)
+   895→   895→   895→    if (!/^\d/.test(name) && name.length < 40 && name.split(/\s+/).length >= 2) {
+   896→   896→   896→      actors.add(name);
+   897→   897→   897→    }
+   898→   898→   898→  }
+   899→   899→   899→
+   900→   900→   900→  // 2. Après « Selon », « D'après »
+   901→   901→   901→  const selonRegex = /(?:Selon|D'après)\s+([^,.]{2,40})/gi;
+   902→   902→   902→  while ((match = selonRegex.exec(reviewText)) !== null) {
+   903→   903→   903→    const name = match[1].trim();
+   904→   904→   904→    // Garder si ça ressemble à un nom propre (majuscule au début)
+   905→   905→   905→    if (/^[A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ]/.test(name) && name.length > 2) {
+   906→   906→   906→      actors.add(name);
+   907→   907→   907→    }
+   908→   908→   908→  }
+   909→   909→   909→
+   910→   910→   910→  // 3. Noms propres entre guillemets suivis d'une source
+   911→   911→   911→  const quoteActorRegex = /«\s*[^»]{10,200}\s*»\s*[—–-]\s*([A-ZÀÂÉÈÊËÎÏÔÙÛÜÇÆŒ][a-zàâéèêëîïôùûüçæœ\s]{2,35})/g;
+   912→   912→   912→  while ((match = quoteActorRegex.exec(reviewText)) !== null) {
+   913→   913→   913→    actors.add(match[1].trim());
+   914→   914→   914→  }
+   915→   915→   915→
+   916→   916→   916→  // 4. Liste élargie de figures connues (pattern flexible)
+   917→   917→   917→  const knownFigures = [
+   918→   918→   918→    'Macron', 'Barnier', 'Le Pen', 'Mélenchon', 'Scholz', 'Trump', 'Biden',
+   919→   919→   919→    'Xi', 'Poutine', 'Starmer', 'Lula', 'Milei', 'Zelensky', 'Netanyahu',
+   920→   920→   920→    'Mitsotakis', 'Maréchal', 'Darmanin', 'Attal', 'Borne', 'Castex',
+   921→   921→   921→    'Von der Leyen', 'Blinken', 'Lavrov', 'Khamenei', 'Modi', 'Meloni',
+   922→   922→   922→  ];
+   923→   923→   923→  for (const figure of knownFigures) {
+   924→   924→   924→    if (reviewText.includes(figure)) actors.add(figure);
+   925→   925→   925→  }
+   926→   926→   926→
+   927→   927→   927→  return [...actors].slice(0, 15);
+   928→   928→   928→}
+   929→   929→   929→
+   930→   930→   930→// ============================================================
+   931→   931→   931→// FONCTIONS INTERNES — Extraction d'entités (pays, orgs, lieux)
+   932→   932→   932→// ============================================================
+   933→   933→   933→
+   934→   934→   934→function extractEntities(reviewText) {
+   935→   935→   935→  const entities = { countries: new Set(), organizations: new Set(), places: new Set() };
+   936→   936→   936→
+   937→   937→   937→  // Pays (liste des principaux pays cités dans une revue de presse francophone)
+   938→   938→   938→  const countries = [
+   939→   939→   939→    'France', 'États-Unis', 'USA', 'Chine', 'Russie', 'Ukraine', 'Allemagne',
+   940→   940→   940→    'Royaume-Uni', 'Grèce', 'Espagne', 'Italie', 'Argentine', 'Brésil', 'Venezuela',
+   941→   941→   941→    'Iran', 'Israël', 'Palestine', 'Gaza', 'Cisjordanie', 'Liban', 'Syrie',
+   942→   942→   942→    'Turquie', 'Inde', 'Japon', 'Corée', 'Maroc', 'Sénégal', 'Algérie',
+   943→   943→   943→    'Tunisie', 'Mozambique', 'Pologne', 'Hongrie', 'Roumanie', 'Tchéquie',
+   944→   944→   944→    'Moldavie', 'Géorgie', 'Arménie', 'Azerbaïdjan', 'Mali', 'Niger', 'Tchad',
+   945→   945→   945→    'Sahel', 'Kanaky', 'Nouvelle-Calédonie', 'Taïwan', 'Colombie', 'Mexique',
+   946→   946→   946→    'Cuba', 'Haïti', 'RD Congo', 'RDC', 'Égypte', 'Arabie Saoudite',
+   947→   947→   947→  ];
+   948→   948→   948→  for (const c of countries) {
+   949→   949→   949→    if (reviewText.includes(c)) entities.countries.add(c);
+   950→   950→   950→  }
+   951→   951→   951→
+   952→   952→   952→  // Organisations
+   953→   953→   953→  const orgs = [
+   954→   954→   954→    'UE', 'Union européenne', 'OTAN', 'ONU', 'FMI', 'Banque mondiale',
+   955→   955→   955→    'Banque centrale', 'BCE', 'Fed', 'G7', 'G20', 'OCI',
+   956→   956→   956→    'Parlement européen', 'Commission européenne', 'Conseil européen',
+   957→   957→   957→    'Assemblée nationale', 'Sénat', 'Conseil constitutionnel',
+   958→   958→   958→    'Cour internationale de justice', 'CIJ', 'CPI', 'Cour pénale',
+   959→   959→   959→    'Amnesty International', 'Human Rights Watch', 'MSF', 'Croix-Rouge',
+   960→   960→   960→    'TotalEnergies', 'EDF', 'Airbus', 'LVMH',
+   961→   961→   961→    'Front national', 'Rassemblement national', 'RN', 'LFI',
+   962→   962→   962→    'France Insoumise', 'EELV', 'Nupes', 'Nouvelle-Démocratie',
+   963→   963→   963→    'Union européenne', 'Hamas', 'Hezbollah', 'OTAN',
+   964→   964→   964→  ];
+   965→   965→   965→  for (const o of orgs) {
+   966→   966→   966→    if (reviewText.includes(o)) entities.organizations.add(o);
+   967→   967→   967→  }
+   968→   968→   968→
+   969→   969→   969→  return {
+   970→   970→   970→    countries: [...entities.countries].slice(0, 10),
+   971→   971→   971→    organizations: [...entities.organizations].slice(0, 10),
+   972→   972→   972→    places: [...entities.places].slice(0, 5),
+   973→   973→   973→  };
+   974→   974→   974→}
+   975→   975→   975→
+   976→   976→   976→/**
+   977→   977→   977→ * Stocke le score de qualité d'une revue (issu du STAGE4)
+   978→   978→   978→ * KV: memory:quality:YYYY-MM-DD  (TTL 90j)
+   979→   979→   979→ */
+   980→   980→   980→export async function saveQualityScore(env, dateStr, score, reviewContent) {
+   981→   981→   981→  const key = `${MEM_PREFIX}quality:${dateStr}`;
+   982→   982→   982→  await env.CACHE.put(key, JSON.stringify({
+   983→   983→   983→    date: dateStr,
+   984→   984→   984→    score,
+   985→   985→   985→    wordCount: reviewContent.split(/\s+/).length,
+   986→   986→   986→    themesCount: (reviewContent.match(/^\*\*\d+\./gm) || []).length,
+   987→   987→   987→    hasPointsDeTension: reviewContent.includes('Points de tension'),
+   988→   988→   988→    hasSurveiller: reviewContent.includes('À surveiller'),
+   989→   989→   989→    createdAt: new Date().toISOString(),
+   990→   990→   990→  }), { expirationTtl: 90 * 24 * 3600 });
+   991→   991→   991→}
+   992→   992→   992→
+   993→   993→   993→/**
+   994→   994→   994→ * Met à jour l'index des jours avec mémoires (optimisation KV)
+   995→   995→   995→ * KV: memory:day_index  (TTL 365j)
+   996→   996→   996→ */
+   997→   997→   997→async function updateDayIndex(env, dateStr) {
+   998→   998→   998→  const key = `${MEM_PREFIX}day_index`;
+   999→   999→   999→  const raw = await env.CACHE.get(key);
+  1000→  1000→  1000→  let index = raw ? JSON.parse(raw) : { days: [] };
+  1001→  1001→  1001→  if (!index.days.includes(dateStr)) {
+  1002→  1002→  1002→    index.days.push(dateStr);
+  1003→  1003→  1003→    index.days.sort();
+  1004→  1004→  1004→    // Garder max 60 jours
+  1005→  1005→  1005→    index.days = index.days.slice(-60);
+  1006→  1006→  1006→    await env.CACHE.put(key, JSON.stringify(index), { expirationTtl: 365 * 24 * 3600 });
+  1007→  1007→  1007→  }
+  1008→  1008→  1008→  return index;
+  1009→  1009→  1009→}
+  1010→  1010→  1010→
+  1011→  1011→  1011→function normalizeTheme(theme) {
+  1012→  1012→  1012→  return theme
+  1013→  1013→  1013→    .toLowerCase()
+  1014→  1014→  1014→    .replace(/[^a-zàâéèêëïîôùûüÿçœæ0-9\s]/g, '')
+  1015→  1015→  1015→    .replace(/\s+/g, '_')
+  1016→  1016→  1016→    .substring(0, 50);
+  1017→  1017→  1017→}
+  1018→  1018→  1018→
+  1019→  1019→  1019→function computeThemeSimilarity(a, b) {
+  1020→  1020→  1020→  const wordsA = new Set(a.split(/[\s_]+/));
+  1021→  1021→  1021→  const wordsB = new Set(b.split(/[\s_]+/));
+  1022→  1022→  1022→  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+  1023→  1023→  1023→  let intersection = 0;
+  1024→  1024→  1024→  for (const w of wordsA) {
+  1025→  1025→  1025→    if (wordsB.has(w)) intersection++;
+  1026→  1026→  1026→  }
+  1027→  1027→  1027→  return intersection / Math.max(wordsA.size, wordsB.size);
+  1028→  1028→  1028→}
+  1029→  1029→  1029→
+  1030→  1030→  1030→function daysBetween(dateStr1, dateStr2) {
+  1031→  1031→  1031→  const d1 = new Date(dateStr1);
+  1032→  1032→  1032→  const d2 = new Date(dateStr2);
+  1033→  1033→  1033→  return Math.round(Math.abs(d2 - d1) / (24 * 3600 * 1000));
+  1034→  1034→  1034→}
