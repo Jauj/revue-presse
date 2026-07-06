@@ -350,7 +350,7 @@ async function callGemini(apiKey, systemPrompt, userPrompt, maxOutputTokens = 80
 /** Workers AI fallback */
 async function callWorkersAI(env, prompt) {
   if (!env.AI) throw new Error('Workers AI non configuré');
-  const models = ['@cf/meta/llama-3.3-70b-instruct', '@cf/meta/llama-3.1-8b-instruct'];
+  const models = ['@cf/meta/llama-4-scout-17b-16e-instruct', '@cf/meta/llama-3.1-8b-instruct'];
   for (const model of models) {
     try {
       const r = await env.AI.run(model, { prompt, max_tokens: 8000, temperature: 0.2 });
@@ -642,14 +642,14 @@ export async function testProviders(env) {
   if (env.AI) {
     const start = Date.now();
     try {
-      const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct', { prompt: `${testSystem}\n${testPrompt}`, max_tokens: 50, temperature: 0.2 });
+      const r = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { prompt: `${testSystem}\n${testPrompt}`, max_tokens: 50, temperature: 0.2 });
       const resp = r.response || '';
-      results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: resp.length > 0, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+      results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: resp.length > 0, response: resp.trim().substring(0, 50), latency: Date.now() - start });
     } catch (err) {
-      results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+      results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
     }
   } else {
-    results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: false, error: 'AI binding non configurée' });
+    results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: false, error: 'AI binding non configurée' });
   }
 
   return results;
