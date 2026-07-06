@@ -1,8 +1,8 @@
 // ============================================================
-// index.js — Point d'entrée Cloudflare Worker v3.4
+// index.js — Point d'entrée Cloudflare Worker v3.4.1
 // 8 phases CoT + Mémoire éditoriale
-// FETCH → FILTER → EXTRACT → THEME → DRAFT →
-//   REVIEW → SYNTHESIS → DELIVER + MEMORY SAVE
+// Providers : Groq (rapide, gratuit) → Gemini → Mistral → Workers AI
+// Extraits 200 mots, max_tokens par étape, cascade robuste
 // ============================================================
 
 import {
@@ -11,7 +11,7 @@ import {
 } from './pipeline.js';
 import { getMemoryStats, dreamDistill } from './memory.js';
 
-const VERSION = '3.4.0';
+const VERSION = '3.4.1';
 
 export default {
   async scheduled(event, env, ctx) {

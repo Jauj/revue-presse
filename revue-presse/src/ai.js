@@ -1,8 +1,11 @@
 // ============================================================
 // ai.js — Chain of Thought multi-étapes (Mixture-of-Agents)
-// Providers : Mistral → Gemini → Workers AI (cascade fallback)
+// Providers : Groq (rapide, gratuit) → Gemini → Mistral → Workers AI
+// v3.4.1 — Optimisation performance : Groq Llama 3.3 70B en 1er,
+//           extraits réduits à 200 mots, max_tokens par étape
 // ============================================================
 
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
@@ -92,7 +95,7 @@ Tu dois :
 </missing_angles>`;
 
 // ============================================================
-// ÉTAPE 3 : RÉDACTION — Rédiger les sections Smart Brevity
+// ÉTAPE 3 : RÉDACTION — Rédiger les sections éditoriales
 // ============================================================
 const STAGE3_PROMPT = `${BASE_SYSTEM}
 
@@ -230,7 +233,9 @@ RAPPEL DES RÈGLES DE DATAGE :
 - Format combiné : (id="N") avec date source entre parenthèses après le nom`;
 
 // ============================================================
-// PROMPT UTILITAIRE : Construire les articles XML — 500 mots
+// PROMPT UTILITAIRE : Construire les articles XML
+// Extraits réduits à 200 mots (suffisant pour extraction/thématisation,
+// le draft a accès au contenu filtré en KV si besoin)
 // ============================================================
 
 /** Échappe les caractères XML dangereux pour éviter de casser le parsing */
@@ -252,12 +257,12 @@ function formatDateForAI(dateStr) {
   } catch { return dateStr; }
 }
 
-function buildArticlesXML(articles) {
+function buildArticlesXML(articles, maxWordsPerArticle = 200) {
   let xml = `<articles count="${articles.length}">\n`;
   for (let i = 0; i < articles.length; i++) {
     const a = articles[i];
     const text = a.extractedText || a.description || '(indisponible)';
-    const excerpt = text.split(/\s+/).slice(0, 500).join(' ');
+    const excerpt = text.split(/\s+/).slice(0, maxWordsPerArticle).join(' ');
     xml += `<article id="${i + 1}">\n`;
     xml += `<source>${escapeXML(a.sourceName)}</source>\n`;
     xml += `<lang>${escapeXML(a.sourceLang || 'fr')}</lang>\n`;
@@ -273,11 +278,32 @@ function buildArticlesXML(articles) {
 }
 
 // ============================================================
-// Appels API — Cascade fallback Mistral → Gemini → Workers AI
+// Appels API — Cascade fallback Groq → Gemini → Mistral → Workers AI
+// Groq (Llama 3.3 70B) : gratuit, <10s, idéal pour extraction/thèmes
+// Gemini Flash : gratuit, fiable, bon pour les longues sorties
+// Mistral : premium, lent sur gros volumes, fallback
+// Workers AI : dernier recours, qualité variable
 // ============================================================
 
-/** Appel IA format OpenAI (Mistral) — timeout 120s, pas de retry (cascade fallback) */
-async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
+/**
+ * max_tokens adapté par étape pour optimiser vitesse + qualité :
+ * - Extraction : 4000 (format structuré compact)
+ * - Thématisation : 6000 (XML structuré)
+ * - Draft/Synthesis : 12000 (texte éditorial long)
+ * - Review : 4000 (rapport structuré)
+ */
+const MAX_TOKENS_BY_STAGE = {
+  extraction: 4000,
+  theming: 6000,
+  drafting: 12000,
+  review: 4000,
+  synthesis: 12000,
+  dream: 4000,
+  default: 8000,
+};
+
+/** Appel IA format OpenAI-compatible (Groq, Mistral, etc.) */
+async function callOpenAICompatible(endpoint, model, apiKey, systemPrompt, userPrompt, maxTokens = 8000) {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -288,18 +314,21 @@ async function callOpenAI(endpoint, model, apiKey, systemPrompt, userPrompt) {
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.2,
-      max_tokens: 12000,
+      max_tokens: maxTokens,
       top_p: 0.9,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(180000),
   });
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errBody.substring(0, 200)}`);
+  }
   return (await response.json()).choices[0].message.content;
 }
 
-/** Appel Gemini (API native) — timeout 120s */
-async function callGemini(apiKey, systemPrompt, userPrompt) {
+/** Appel Gemini (API native) — timeout 180s */
+async function callGemini(apiKey, systemPrompt, userPrompt, maxOutputTokens = 8000) {
   const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -309,9 +338,9 @@ async function callGemini(apiKey, systemPrompt, userPrompt) {
         role: 'user',
         parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
       }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 12000, topP: 0.9 },
+      generationConfig: { temperature: 0.2, maxOutputTokens, topP: 0.9 },
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(180000),
   });
   if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${await response.text()}`);
   const data = await response.json();
@@ -334,32 +363,47 @@ async function callWorkersAI(env, prompt) {
 
 /**
  * Appel IA avec cascade fallback complète
- * Essaye chaque provider dans l'ordre, passe au suivant en cas d'erreur
- * Les erreurs de contenu vide (pas de texte retourné) déclenchent aussi le fallback
+ * Ordre : Groq (Llama 3.3 70B, <10s) → Gemini Flash → Mistral-medium → Mistral-large → Workers AI
+ * Groq est gratuit et extrêmement rapide — parfait pour le pipeline CoT
  */
-export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false) {
+export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false, stageHint = 'default') {
   const providers = [];
+  const maxTokens = MAX_TOKENS_BY_STAGE[stageHint] || MAX_TOKENS_BY_STAGE.default;
 
-  if (env.MISTRAL_API_KEY) {
-    providers.push({ type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY });
+  // 1. Groq — gratuit, Llama 3.3 70B, répond en <10s
+  if (env.GROQ_API_KEY) {
+    providers.push({ type: 'groq', model: 'llama-3.3-70b-versatile', key: env.GROQ_API_KEY, endpoint: GROQ_ENDPOINT });
   }
+
+  // 2. Gemini Flash — gratuit, fiable, bon sur gros volumes
   if (env.GEMINI_API_KEY) {
     providers.push({ type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY });
   }
+
+  // 3. Mistral — premium, plus lent mais haute qualité
+  if (env.MISTRAL_API_KEY) {
+    // medium d'abord (plus rapide), large en backup
+    providers.push({ type: 'mistral', model: 'mistral-medium-latest', key: env.MISTRAL_API_KEY, endpoint: MISTRAL_ENDPOINT });
+    providers.push({ type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY, endpoint: MISTRAL_ENDPOINT });
+  }
+
+  // 4. Workers AI — dernier recours
   providers.push({ type: 'workersai' });
 
   const errors = [];
 
   for (const provider of providers) {
+    const startTime = Date.now();
     try {
       let result;
-      if (provider.type === 'mistral') {
-        result = await callOpenAI(MISTRAL_ENDPOINT, provider.model, provider.key, systemPrompt, userPrompt);
+      if (provider.type === 'groq' || provider.type === 'mistral') {
+        result = await callOpenAICompatible(provider.endpoint, provider.model, provider.key, systemPrompt, userPrompt, maxTokens);
       } else if (provider.type === 'gemini') {
-        result = await callGemini(provider.key, systemPrompt, userPrompt);
+        result = await callGemini(provider.key, systemPrompt, userPrompt, maxTokens);
       } else {
         result = await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
       }
+      const duration = Date.now() - startTime;
 
       // Vérifier que le contenu est substantiel
       if (!result || result.trim().length < 50) {
@@ -369,12 +413,13 @@ export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = 
         continue;
       }
 
-      console.log(`[callAI] Succès avec ${provider.type}${provider.model ? '/' + provider.model : ''} (${result.length} chars)`);
-      return { content: result, provider: provider.type };
+      console.log(`[callAI] ✅ ${provider.type}/${provider.model} — ${result.length} chars en ${(duration/1000).toFixed(1)}s`);
+      return { content: result, provider: provider.type, duration };
     } catch (err) {
+      const duration = Date.now() - startTime;
       const errMsg = `${provider.type}: ${err.message}`;
       errors.push(errMsg);
-      console.error(`[callAI] Échec ${provider.type}: ${err.message}`);
+      console.error(`[callAI] ❌ ${provider.type}/${provider.model || ''} — ${err.message} (après ${(duration/1000).toFixed(1)}s)`);
       continue;
     }
   }
@@ -390,28 +435,28 @@ export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = 
  * ÉTAPE 1 : Extraction des faits structurés
  */
 export async function stage1_extract(articles, env) {
-  const xml = buildArticlesXML(articles);
+  const xml = buildArticlesXML(articles, 200); // 200 mots suffit pour l'extraction
   const userPrompt = `Extrais les faits clés de ces ${articles.length} articles :\n\n${xml}`;
-  const result = await callAI(env, STAGE1_PROMPT, userPrompt, true);
-  return { stage: 'extraction', content: result.content, provider: result.provider };
+  const result = await callAI(env, STAGE1_PROMPT, userPrompt, true, 'extraction');
+  return { stage: 'extraction', content: result.content, provider: result.provider, duration: result.duration };
 }
 
 /**
  * ÉTAPE 2 : Thématisation et regroupement
  */
 export async function stage2_theme(extraction, articles, env) {
-  const xml = buildArticlesXML(articles);
+  const xml = buildArticlesXML(articles, 200);
   const userPrompt = `Voici les fiches structurées extraites de ${articles.length} articles :\n\n${extraction}\n\n---\n\nArticles originaux pour référence :\n${xml}`;
-  const result = await callAI(env, STAGE2_PROMPT, userPrompt, true);
-  return { stage: 'theming', content: result.content, provider: result.provider };
+  const result = await callAI(env, STAGE2_PROMPT, userPrompt, true, 'theming');
+  return { stage: 'theming', content: result.content, provider: result.provider, duration: result.duration };
 }
 
 /**
- * ÉTAPE 3 : Rédaction du brouillon Smart Brevity
- * (optionnellement enrichi par recherche web)
+ * ÉTAPE 3 : Rédaction du brouillon éditorial
+ * (optionnellement enrichi par recherche web et mémoire)
  */
 export async function stage3_draft(themes, articles, env, webResearch = null, memoryContext = null) {
-  const xml = buildArticlesXML(articles);
+  const xml = buildArticlesXML(articles, 250); // un peu plus pour le draft (250 mots)
 
   let userPrompt = `Voici le regroupement thématique :\n\n${themes}\n\n---\n\nArticles originaux :\n${xml}`;
 
@@ -430,31 +475,30 @@ export async function stage3_draft(themes, articles, env, webResearch = null, me
     userPrompt += `\n\n---\n\n${memoryContext}\n`;
   }
 
-  const result = await callAI(env, STAGE3_PROMPT, userPrompt, true);
-  return { stage: 'drafting', content: result.content, provider: result.provider };
+  const result = await callAI(env, STAGE3_PROMPT, userPrompt, true, 'drafting');
+  return { stage: 'drafting', content: result.content, provider: result.provider, duration: result.duration };
 }
 
 /**
  * ÉTAPE 4 : Revue critique (auto-évaluation)
  */
 export async function stage4_review(draft, articles, env) {
-  const xml = buildArticlesXML(articles);
+  const xml = buildArticlesXML(articles, 150); // 150 mots suffit pour vérifier les faits
   const userPrompt = `REVUE À ÉVALUER :\n\n${draft}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
-  const result = await callAI(env, STAGE4_PROMPT, userPrompt, true);
-  return { stage: 'review', content: result.content, provider: result.provider };
+  const result = await callAI(env, STAGE4_PROMPT, userPrompt, true, 'review');
+  return { stage: 'review', content: result.content, provider: result.provider, duration: result.duration };
 }
 
 /**
  * ÉTAPE 5 : Synthèse EIC (version finale)
- * 1 seul appel IA (économie de sous-requêtes)
  */
 export async function stage5_synthesis(draft, review, articles, env) {
-  const xml = buildArticlesXML(articles);
+  const xml = buildArticlesXML(articles, 200);
 
   const prompt1 = `BROUILLON À AMÉLIORER :\n\n${draft}\n\n---\n\nRAPPORT DE REVUE CRITIQUE :\n\n${review}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
-  const synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true);
+  const synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true, 'synthesis');
 
-  return { stage: 'synthesis', content: synthesisResult.content, provider: synthesisResult.provider };
+  return { stage: 'synthesis', content: synthesisResult.content, provider: synthesisResult.provider, duration: synthesisResult.duration };
 }
 
 // ============================================================
@@ -495,7 +539,7 @@ function generateRuleBasedReview(articles) {
 export async function generatePressReview(articles, env) {
   const userPrompt = `Produis la revue de presse à partir des ${articles.length} articles ci-dessous. Traite-les tous.\n\n${buildArticlesXML(articles)}`;
   try {
-    const result = await callAI(env, STAGE3_PROMPT, userPrompt, true);
+    const result = await callAI(env, STAGE3_PROMPT, userPrompt, true, 'drafting');
     return { content: result.content, provider: result.provider, model: 'cot-single', success: true };
   } catch (err) {
     return {
