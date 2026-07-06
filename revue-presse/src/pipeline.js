@@ -7,7 +7,7 @@
 import { fetchAllFeeds } from './fetcher.js';
 import { fetchAllNewsAPIs } from './news-apis.js';
 import { filterAndSelect } from './filter.js';
-import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis } from './ai.js';
+import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synthesis, generateFastReview } from './ai.js';
 import { webSearchMultiLang } from './searcher.js';
 import { buildEmailHTML, buildEmailText, buildSubject, sendEmail } from './email.js';
 import { saveDailyMemory, updateSemanticMemory, updateNarratives, getMemoryContext, dreamDistill, saveQualityScore } from './memory.js';
@@ -474,6 +474,94 @@ export async function phaseDeliver(env, eventTime) {
 
   await env.CACHE.put(statusKey('deliver'), JSON.stringify(status), { expirationTtl: 86400 });
   return status;
+}
+
+// ============================================================
+// PHASE FALLBACK — Mode rapide (1 appel IA) pour garantir l'email
+// Se déclenche si le pipeline CoT échoue à l'extraction ou à la synthèse
+// ============================================================
+export async function phaseFastFallback(env, eventTime) {
+  const status = { phase: 'fast_fallback', startedAt: eventTime.toISOString(), step: 'kv_read' };
+
+  try {
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!articlesRaw) throw new Error('Aucun article en KV. Phase FILTER exécutée ?');
+
+    const { articles, meta } = JSON.parse(articlesRaw);
+    status.step = 'memory_context';
+
+    // Essayer d'obtenir le contexte mémoire (non bloquant)
+    let memoryContext = null;
+    try {
+      memoryContext = await getMemoryContext(env, 7);
+    } catch (e) { /* non bloquant */ }
+
+    status.step = 'ai_fast_review';
+    const result = await generateFastReview(articles, env, memoryContext);
+
+    // Stocker comme revue finale
+    status.step = 'kv_store';
+    await env.CACHE.put(KV_REVIEW_FINAL, JSON.stringify({
+      date: eventTime.toISOString(),
+      content: result.content,
+      provider: result.provider,
+      meta,
+      cotStages: ['fast_fallback'],
+      isFallback: result.isFallback || false,
+    }), { expirationTtl: 7200 });
+
+    // Sauvegarder mémoire (non bloquant, best-effort)
+    try {
+      const dateStr = eventTime.toISOString().split('T')[0];
+      const dailyMemory = await saveDailyMemory(env, eventTime, result.content, articles);
+      await updateSemanticMemory(env, dailyMemory);
+      await updateNarratives(env, dailyMemory);
+      status.memorySaved = true;
+    } catch (e) {
+      console.warn(`[FastFallback] Mémoire non sauvegardée: ${e.message}`);
+    }
+
+    status.success = true;
+    status.provider = result.provider;
+    status.outputLength = result.content.length;
+    status.mode = result.mode || 'fast';
+
+  } catch (err) {
+    status.success = false;
+    status.error = err.message;
+  }
+
+  await env.CACHE.put(statusKey('fast_fallback'), JSON.stringify(status), { expirationTtl: 86400 });
+  return status;
+}
+
+/**
+ * Sauvegarde la mémoire en arrière-plan (pour ctx.waitUntil)
+ */
+export async function backgroundMemorySave(env, eventTime) {
+  try {
+    const reviewRaw = await env.CACHE.get(KV_REVIEW_FINAL);
+    const articlesRaw = await env.CACHE.get(KV_ARTICLES);
+    if (!reviewRaw || !articlesRaw) return;
+
+    const { content } = JSON.parse(reviewRaw);
+    const { articles } = JSON.parse(articlesRaw);
+    const dateStr = eventTime.toISOString().split('T')[0];
+
+    const dailyMemory = await saveDailyMemory(env, eventTime, content, articles);
+    await updateSemanticMemory(env, dailyMemory);
+    await updateNarratives(env, dailyMemory);
+
+    // Rêve le vendredi
+    const dayOfWeek = eventTime.getDay();
+    if (dayOfWeek === 5) {
+      await dreamDistill(env, 14, false);
+    }
+
+    console.log(`[BackgroundMemory] Sauvegardé: ${dailyMemory.themes.length} thèmes`);
+  } catch (err) {
+    console.warn(`[BackgroundMemory] Erreur: ${err.message}`);
+  }
 }
 
 // ============================================================

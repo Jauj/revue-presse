@@ -502,7 +502,161 @@ export async function stage5_synthesis(draft, review, articles, env) {
 }
 
 // ============================================================
-// Fallback basé sur des règles
+// FAST REVIEW — Mode dégradé : 1 seul appel IA pour garantir l'email
+// Utilise le même format éditorial mais condense extraction+thèmes+draft
+// ============================================================
+
+const FAST_REVIEW_PROMPT = `${BASE_SYSTEM}
+
+## MISSION — REVUE DE PRESSE DIRECTE (mode rapide)
+Tu reçois des articles bruts. Tu produis UNE SEULE revue de presse éditoriale complète.
+Pas d'étape intermédiaire — tu extrais, thématise et rédiges en un seul passage.
+
+## FORMAT DE SORTIE (identique au mode CoT complet)
+
+**Sommaire**
+
+    [Titre de l'éditorial 1]
+    [Titre de l'éditorial 2]
+    [...]
+
+**1. [Titre éditorial 1 : sous-titre incisif]**
+«\u00a0[Citation exacte d'un article]\u00a0» — [Source] (id="N"). [Contexte avec DATE].
+
+[2 paragraphes d'analyse, 3-5 phrases chacun, croisant 2+ sources.]
+
+---
+Sources
+
+    «\u00a0[Titre exact]\u00a0» — [Source] — [URL] (id="N")
+
+**2. [Titre éditorial 2]**
+[Même format]
+
+[...max 6 éditoriaux...]
+
+**Points de tension**
+    1. **[Question ouverte]** [2-3 phrases]
+    [...max 4...]
+
+**À surveiller**
+    1. **[Événement]** [1-2 phrases]
+    [...max 5...]
+
+## RÈGLES
+- Max 6 éditoriaux (qualité > quantité en mode rapide)
+- Même format éditorial analytique que le mode CoT complet
+- Datage systématique, citations exactes, attribution (id="N")
+- Ne RIEN inventer en dehors des articles fournis`;
+
+/**
+ * Génère une revue complète en 1 seul appel IA (fallback garanti)
+ * Si même ça échoue → fallback basé sur des règles (pas d'IA)
+ */
+export async function generateFastReview(articles, env, memoryContext = null) {
+  // Limiter à 30 articles pour le mode rapide (garantit la vitesse)
+  const subset = articles.length > 30 ? articles.slice(0, 30) : articles;
+  const xml = buildArticlesXML(subset, 200);
+
+  let userPrompt = `Voici ${subset.length} articles. Rédige la revue de presse éditoriale complète :\n\n${xml}`;
+  if (memoryContext) {
+    userPrompt += `\n\n---\n\n${memoryContext}\n`;
+  }
+
+  try {
+    const result = await callAI(env, FAST_REVIEW_PROMPT, userPrompt, true, 'drafting');
+    return { content: result.content, provider: result.provider, success: true, mode: 'fast' };
+  } catch (err) {
+    // Dernier recours : pas d'IA du tout
+    console.error(`[FastReview] IA échouée: ${err.message}, fallback règles`);
+    return {
+      content: generateRuleBasedReview(articles),
+      provider: 'rule-based',
+      success: true,
+      isFallback: true,
+      lastError: err.message,
+      mode: 'rule-based',
+    };
+  }
+}
+
+// ============================================================
+// TEST PROVIDERS — Diagnostic des providers IA disponibles
+// ============================================================
+
+/**
+ * Teste chaque provider IA avec un prompt minimal
+ * Retourne les résultats pour diagnostic
+ */
+export async function testProviders(env) {
+  const results = [];
+  const testPrompt = 'Réponds uniquement par "OK" en français.';
+  const testSystem = 'Tu es un assistant de test.';
+
+  // Test Groq
+  if (env.GROQ_API_KEY) {
+    const start = Date.now();
+    try {
+      const resp = await callOpenAICompatible(
+        GROQ_ENDPOINT, 'llama-3.3-70b-versatile', env.GROQ_API_KEY,
+        testSystem, testPrompt, 50
+      );
+      results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+    } catch (err) {
+      results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+    }
+  } else {
+    results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: false, error: 'GROQ_API_KEY non configurée' });
+  }
+
+  // Test Gemini
+  if (env.GEMINI_API_KEY) {
+    const start = Date.now();
+    try {
+      const resp = await callGemini(env.GEMINI_API_KEY, testSystem, testPrompt, 50);
+      results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+    } catch (err) {
+      results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+    }
+  } else {
+    results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: false, error: 'GEMINI_API_KEY non configurée' });
+  }
+
+  // Test Mistral medium
+  if (env.MISTRAL_API_KEY) {
+    const start = Date.now();
+    try {
+      const resp = await callOpenAICompatible(
+        MISTRAL_ENDPOINT, 'mistral-medium-latest', env.MISTRAL_API_KEY,
+        testSystem, testPrompt, 50
+      );
+      results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+    } catch (err) {
+      results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+    }
+  } else {
+    results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: false, error: 'MISTRAL_API_KEY non configurée' });
+  }
+
+  // Test Workers AI
+  if (env.AI) {
+    const start = Date.now();
+    try {
+      const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct', { prompt: `${testSystem}\n${testPrompt}`, max_tokens: 50, temperature: 0.2 });
+      const resp = r.response || '';
+      results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: resp.length > 0, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+    } catch (err) {
+      results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+    }
+  } else {
+    results.push({ provider: 'workersai', model: 'llama-3.3-70b-instruct', ok: false, error: 'AI binding non configurée' });
+  }
+
+  return results;
+}
+
+// ============================================================
+// Fallback basé sur des règles (dernier recours absolu)
 // ============================================================
 function generateRuleBasedReview(articles) {
   const lines = [];
@@ -531,24 +685,4 @@ function generateRuleBasedReview(articles) {
   lines.push('---\n');
   lines.push('⚠️ *Mode dégradé — IA indisponible*');
   return lines.join('\n');
-}
-
-/**
- * Fonction legacy pour compatibilité
- */
-export async function generatePressReview(articles, env) {
-  const userPrompt = `Produis la revue de presse à partir des ${articles.length} articles ci-dessous. Traite-les tous.\n\n${buildArticlesXML(articles)}`;
-  try {
-    const result = await callAI(env, STAGE3_PROMPT, userPrompt, true, 'drafting');
-    return { content: result.content, provider: result.provider, model: 'cot-single', success: true };
-  } catch (err) {
-    return {
-      content: generateRuleBasedReview(articles),
-      provider: 'rule-based-fallback',
-      model: 'none',
-      success: true,
-      isFallback: true,
-      lastError: err.message,
-    };
-  }
 }
