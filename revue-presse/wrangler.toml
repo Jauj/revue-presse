@@ -18,23 +18,19 @@ binding = "CACHE"
 id = "ef1ef185628f45d9bc6f9d5c209b0efe"
 
 # === D1 Database (mémoire documentaire épistémique) ===
-# ⚠️ À créer avec : npx wrangler d1 create revue-presse-db
-# puis remplacer <DATABASE_ID> par l'ID retourné
 [[d1_databases]]
 binding = "DB"
 database_name = "revue-presse-db"
-database_id = "<DATABASE_ID>"
+database_id = "795701a2-deaa-439b-af89-ec6689d629a9"
 
-# === Vectorize (recherche sémantique — optionnel) ===
-# ⚠️ À créer avec : npx wrangler vectorize create revue-presse-memory --dimensions=384 --metric=cosine
-# puis remplacer <INDEX_ID> par l'ID retourné
-# [[vectorize]]
-# binding = "VECTORIZE"
-# index_name = "revue-presse-memory"
-# index_id = "<INDEX_ID>"
+# === Vectorize (recherche sémantique) ===
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "revue-presse-memory"
 
-# === R2 Bucket (stockage fichiers originaux — optionnel) ===
-# ⚠️ À créer avec : npx wrangler r2 bucket create revue-presse-docs
+# === R2 Bucket (stockage fichiers originaux) ===
+# ⚠️ Activer R2 dans le Dashboard Cloudflare (R2 > Create bucket)
+# Puis décommenter les lignes ci-dessous
 # [[r2_buckets]]
 # binding = "DOCS_BUCKET"
 # bucket_name = "revue-presse-docs"

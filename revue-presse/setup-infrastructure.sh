@@ -115,8 +115,14 @@ echo ""
 
 # === 5. Clé API Groq ===
 echo "📦 [5/5] Configuration de la clé API Groq..."
-echo "$GROQ_API_KEY" | npx wrangler secret put GROQ_API_KEY
-echo "✅ Clé Groq configurée"
+if [ -n "$GROQ_API_KEY" ]; then
+  echo "$GROQ_API_KEY" | npx wrangler secret put GROQ_API_KEY
+  echo "✅ Clé Groq configurée (depuis la variable d'environnement)"
+else
+  echo "⚠️  Variable GROQ_API_KEY non définie."
+  echo "   Utilise : GROQ_API_KEY=ta_cle bash setup-infrastructure.sh"
+  echo "   Ou manuellement : echo 'ta_cle' | npx wrangler secret put GROQ_API_KEY"
+fi
 
 echo ""
 echo "=============================================="
