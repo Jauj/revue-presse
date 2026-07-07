@@ -1,0 +1,1301 @@
+     1→// ============================================================
+     2→// docmemory.js — Mémoire documentaire épistémique scientifique
+     3→// Pour une organisation politique : bulletins, rapports, textes,
+     4→// manifestes, communiqués, analyses internes
+     5→//
+     6→// Architecture :
+     7→//   D1       → documents, claims, relations, journal épistémique
+     8→//   Vectorize→ recherche sémantique (optionnel, fallback D1)
+     9→//   R2       → fichiers originaux PDF/docx (optionnel)
+    10→//   KV       → index et état de l'ingestion
+    11→//
+    12→// Approche scientifique :
+    13→//   - Confirmations, invalidations, ajustements, incertitudes
+    14→//   - Traçabilité complète des sources et évolutions
+    15→//   - Rétro-références et prospective à partir des tendances
+    16→//
+    17→// Dégradation gracieuse : si env.DB absent, toutes les fonctions
+    18→// retournent null/empty mais ne cassent pas le pipeline existant.
+    19→// ============================================================
+    20→
+    21→import { callAI } from './ai.js';
+    22→
+    23→// === Vérification de disponibilité D1 ===
+    24→function dbAvailable(env) {
+    25→  return !!env.DB;
+    26→}
+    27→
+    28→function vectorizeAvailable(env) {
+    29→  return !!(env.VECTORIZE && env.AI);
+    30→}
+    31→
+    32→// ============================================================
+    33→// UTILITAIRES
+    34→// ============================================================
+    35→
+    36→function generateId(prefix) {
+    37→  const ts = Date.now().toString(36);
+    38→  const rand = Math.random().toString(36).substring(2, 8);
+    39→  return `${prefix}_${ts}_${rand}`;
+    40→}
+    41→
+    42→function normalizeTopic(topic) {
+    43→  return topic
+    44→    .toLowerCase()
+    45→    .replace(/[^a-zàâéèêëïîôùûüÿçœæ0-9\s]/g, '')
+    46→    .replace(/\s+/g, '_')
+    47→    .substring(0, 60);
+    48→}
+    49→
+    50→function now() {
+    51→  return new Date().toISOString();
+    52→}
+    53→
+    54→/**
+    55→ * Découpe un texte en chunks structurels
+    56→ * Respecte les paragraphes et sections (## Titre, **Gras**)
+    57→ */
+    58→function chunkText(text, maxWordsPerChunk = 800) {
+    59→  const chunks = [];
+    60→  let currentSection = '';
+    61→  let currentChunk = '';
+    62→  let currentWords = 0;
+    63→
+    64→  const lines = text.split('\n');
+    65→  for (const line of lines) {
+    66→    // Détecter les titres de section
+    67→    const sectionMatch = line.match(/^(#{1,3}\s+.+|\*\*[^*]{3,60}\*\*)\s*$/);
+    68→    if (sectionMatch) {
+    69→      // Sauvegarder le chunk en cours s'il a du contenu
+    70→      if (currentChunk.trim()) {
+    71→        chunks.push({
+    72→          content: currentChunk.trim(),
+    73→          section: currentSection,
+    74→        });
+    75→        currentChunk = '';
+    76→        currentWords = 0;
+    77→      }
+    78→      currentSection = sectionMatch[1].replace(/^#+\s*/, '').replace(/\*\*/g, '').trim();
+    79→      currentChunk += line + '\n';
+    80→      continue;
+    81→    }
+    82→
+    83→    const lineWords = line.split(/\s+/).filter(w => w.length > 0).length;
+    84→
+    85→    // Si ajouter cette ligne dépasse la limite et qu'on a déjà du contenu
+    86→    if (currentWords + lineWords > maxWordsPerChunk && currentWords > 100) {
+    87→      chunks.push({
+    88→        content: currentChunk.trim(),
+    89→        section: currentSection,
+    90→      });
+    91→      // Garder la section mais vider le contenu
+    92→      currentChunk = currentSection ? `**${currentSection}** (suite)\n` : '';
+    93→      currentWords = 0;
+    94→    }
+    95→
+    96→    currentChunk += line + '\n';
+    97→    currentWords += lineWords;
+    98→  }
+    99→
+   100→  // Dernier chunk
+   101→  if (currentChunk.trim()) {
+   102→    chunks.push({
+   103→      content: currentChunk.trim(),
+   104→      section: currentSection,
+   105→    });
+   106→  }
+   107→
+   108→  return chunks;
+   109→}
+   110→
+   111→// ============================================================
+   112→// INGESTION — Ajouter un document dans la mémoire
+   113→// ============================================================
+   114→
+   115→/**
+   116→ * Ingestion d'un document par contenu texte
+   117→ * POST /memory/ingest → { title, content, doc_type, date, url?, org_name?, author? }
+   118→ */
+   119→export async function ingestDocument(env, {
+   120→  title,
+   121→  content,
+   122→  doc_type = 'texte_politique',
+   123→  date = null,
+   124→  url = null,
+   125→  org_name = '',
+   126→  author = '',
+   127→}) {
+   128→  if (!dbAvailable(env)) {
+   129→    return { error: 'D1 non configuré. Exécuter setup-infrastructure.sh d\'abord.' };
+   130→  }
+   131→  if (!title || !content) {
+   132→    return { error: 'title et content sont requis.' };
+   133→  }
+   134→  if (content.trim().length < 50) {
+   135→    return { error: 'Le contenu doit faire au moins 50 caractères.' };
+   136→  }
+   137→
+   138→  const docId = generateId('doc');
+   139→  const docDate = date || new Date().toISOString().split('T')[0];
+   140→  const wordCount = content.split(/\s+/).length;
+   141→  const timestamp = now();
+   142→
+   143→  try {
+   144→    // 1. Créer l'entrée document
+   145→    await env.DB.prepare(`
+   146→      INSERT INTO documents (id, title, doc_type, source_url, org_name, doc_date, author, status, word_count, created_at, updated_at)
+   147→      VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+   148→    `).bind(docId, title, doc_type, url || null, org_name, docDate, author, wordCount, timestamp, timestamp).run();
+   149→
+   150→    // 2. Chunking structurel
+   151→    const chunks = chunkText(content);
+   152→    for (let i = 0; i < chunks.length; i++) {
+   153→      const chunkId = `${docId}_${String(i).padStart(3, '0')}`;
+   154→      await env.DB.prepare(`
+   155→        INSERT INTO doc_chunks (id, document_id, content, section, chunk_index, created_at)
+   156→        VALUES (?, ?, ?, ?, ?, ?)
+   157→      `).bind(chunkId, docId, chunks[i].content, chunks[i].section, i, timestamp).run();
+   158→    }
+   159→
+   160→    // 3. Mettre à jour le document
+   161→    await env.DB.prepare(`
+   162→      UPDATE documents SET chunk_count = ?, updated_at = ? WHERE id = ?
+   163→    `).bind(chunks.length, timestamp, docId).run();
+   164→
+   165→    // 4. Indexer dans Vectorize (si disponible)
+   166→    if (vectorizeAvailable(env)) {
+   167→      await indexChunksInVectorize(env, docId, chunks, doc_type);
+   168→    }
+   169→
+   170→    // 5. Extraire les claims via IA (non bloquant pour la réponse)
+   171→    // On le fait de façon synchrone ici car c'est le coeur du système
+   172→    const extractionResult = await extractClaimsFromDocument(env, docId, content, doc_type);
+   173→
+   174→    // 6. Mettre à jour le statut
+   175→    const finalStatus = extractionResult.error ? 'error' : 'extracted';
+   176→    const finalClaims = extractionResult.claims?.length || 0;
+   177→    await env.DB.prepare(`
+   178→      UPDATE documents SET status = ?, claim_count = ?, updated_at = ? WHERE id = ?
+   179→    `).bind(finalStatus, finalClaims, now(), docId).run();
+   180→
+   181→    return {
+   182→      success: true,
+   183→      document_id: docId,
+   184→      title,
+   185→      doc_type,
+   186→      word_count: wordCount,
+   187→      chunk_count: chunks.length,
+   188→      claims_extracted: finalClaims,
+   189→      status: finalStatus,
+   190→      provider: extractionResult.provider,
+   191→    };
+   192→  } catch (err) {
+   193→    // Marquer le document en erreur
+   194→    try {
+   195→      await env.DB.prepare(`
+   196→        UPDATE documents SET status = 'error', updated_at = ? WHERE id = ?
+   197→      `).bind(now(), docId).run();
+   198→    } catch (_) {}
+   199→
+   200→    return { error: err.message, document_id: docId };
+   201→  }
+   202→}
+   203→
+   204→/**
+   205→ * Ingestion depuis une URL (fetch du contenu)
+   206→ * POST /memory/ingest/url → { url, title?, doc_type?, date?, org_name? }
+   207→ */
+   208→export async function ingestFromURL(env, {
+   209→  url,
+   210→  title = null,
+   211→  doc_type = 'texte_politique',
+   212→  date = null,
+   213→  org_name = '',
+   214→}) {
+   215→  if (!dbAvailable(env)) {
+   216→    return { error: 'D1 non configuré.' };
+   217→  }
+   218→  if (!url) {
+   219→    return { error: 'url est requise.' };
+   220→  }
+   221→
+   222→  try {
+   223→    // Fetch avec timeout
+   224→    const controller = new AbortController();
+   225→    const timeout = setTimeout(() => controller.abort(), 30000);
+   226→    const response = await fetch(url, {
+   227→      signal: controller.signal,
+   228→      headers: { 'User-Agent': 'RevuePresse-Bot/4.0' },
+   229→    });
+   230→    clearTimeout(timeout);
+   231→
+   232→    if (!response.ok) {
+   233→      return { error: `Fetch échoué: HTTP ${response.status}` };
+   234→    }
+   235→
+   236→    const contentType = response.headers.get('content-type') || '';
+   237→    let content = '';
+   238→
+   239→    if (contentType.includes('text/html') || contentType.includes('text/plain')) {
+   240→      content = await response.text();
+   241→      // Nettoyage basique du HTML
+   242→      content = content
+   243→        .replace(/<script[\s\S]*?<\/script>/gi, '')
+   244→        .replace(/<style[\s\S]*?<\/style>/gi, '')
+   245→        .replace(/<[^>]+>/g, ' ')
+   246→        .replace(/\s+/g, ' ')
+   247→        .trim();
+   248→    } else if (contentType.includes('application/pdf') || url.endsWith('.pdf')) {
+   249→      return {
+   250→        error: 'PDF non supporté directement. Extraire le texte et utiliser /memory/ingest avec le contenu.',
+   251→        hint: 'Utiliser un outil comme pdftotext, ou copier-coller le texte.',
+   252→      };
+   253→    } else {
+   254→      content = await response.text();
+   255→    }
+   256→
+   257→    if (content.length < 100) {
+   258→      return { error: `Contenu trop court (${content.length} chars) après extraction depuis ${url}` };
+   259→    }
+   260→
+   261→    // Utiliser le title du HTML si non fourni
+   262→    if (!title) {
+   263→      const titleMatch = content.match(/<title[^>]*>(.*?)<\/title>/i);
+   264→      title = titleMatch ? titleMatch[1].trim() : url.split('/').pop() || 'Document sans titre';
+   265→    }
+   266→
+   267→    return await ingestDocument(env, {
+   268→      title,
+   269→      content,
+   270→      doc_type,
+   271→      date,
+   272→      url,
+   273→      org_name,
+   274→    });
+   275→  } catch (err) {
+   276→    return { error: `Erreur lors du fetch: ${err.message}` };
+   277→  }
+   278→}
+   279→
+   280→// ============================================================
+   281→// EXTRACTION IA — Extraction des claims depuis un document
+   282→// ============================================================
+   283→
+   284→const CLAIM_EXTRACTION_SYSTEM = `Tu es un analyste de documents politiques qui extrait des "claims" (assertions) avec une rigueur scientifique épistémique.
+   285→
+   286→## TA MISSION
+   287→Analyse le document et extrais TOUTES les assertions substantielles (positions, faits, analyses, engagements, critiques, hypothèses, objectifs). Ne pas extraire les formules de politesse ou les généralités vides.
+   288→
+   289→## TYPES D'ASSERTIONS
+   290→- **position** : prise de position officielle de l'organisation ("Nous soutenons...", "Notre position est...")
+   291→- **fait** : affirmation factuelle vérifiable, avec chiffres, dates, noms ("Le chômage a augmenté de 2.3%")
+   292→- **analyse** : interprétation, argumentation, lien de causalité ("Cette politique mène à...")
+   293→- **engagement** : action demandée, promesse, revendication ("Nous demandons la suppression de...")
+   294→- **critique** : opposition, rejet, dénonciation ("Nous condamnons...", "Cette mesure est inacceptable")
+   295→- **hypothese** : projection, spéculation, scénario ("Il est probable que...", "Si cette tendance se poursuit...")
+   296→- **objectif** : but déclaré, cible, horizon ("D'ici 2027, nous visons...")
+   297→
+   298→## POSTURES
+   299→- **pour** : soutient activement
+   300→- **contre** : s'oppose activement
+   301→- **nuance** : apporte des réserves ou des précisions
+   302→- **neutre** : descriptive, sans prise de position
+   303→- **critique** : émet un jugement négatif
+   304→- **ambivalent** : mélange de soutien et de réserve
+   305→
+   306→## CONFIANCE ÉPISTÉMIQUE (0.0-1.0)
+   307→- 0.9-1.0 : fait vérifiable avec source/chiffre cité dans le texte
+   308→- 0.7-0.8 : argument solide étayé par des données ou un raisonnement rigoureux
+   309→- 0.5-0.6 : raisonnement logique cohérent mais sans preuve directe
+   310→- 0.3-0.4 : opinion informée, spéculation raisonnable
+   311→- 0.0-0.2 : affirmation non étayée, pure déclaration
+   312→
+   313→## RÈGLES
+   314→- Conserver le TEXTE EXACT de l'assertion (pas de paraphrase)
+   315→- Une assertion = une idée complète avec son argument principal
+   316→- Ne pas décomposer une argumentation en micro-assertions artificielles
+   317→- Chaque claim doit avoir un THÈME principal unique
+   318→- Si un chiffre ou une date est mentionné, le type doit être "fait" sauf s'il sert d'argument dans une "analyse"
+   319→- Les promesses et revendications sont des "engagement"
+   320→- Les doutes et projections sont des "hypothese"
+   321→
+   322→## FORMAT DE RÉPONSE
+   323→JSON STRICT, pas de markdown, pas de commentaires :
+   324→{
+   325→  "claims": [
+   326→    {
+   327→      "claim_text": "texte exact de l'assertion",
+   328→      "claim_type": "position|fait|analyse|engagement|critique|hypothese|objectif",
+   329→      "topic": "thème principal en 2-4 mots",
+   330→      "stance": "pour|contre|nuance|neutre|critique|ambivalent",
+   331→      "confidence": 0.75,
+   332→      "evidence_summary": "résumé des preuves invoquées dans le texte",
+   333→      "temporal_start": "YYYY-MM-DD ou null",
+   334→      "temporal_end": "YYYY-MM-DD ou null"
+   335→    }
+   336→  ]
+   337→}
+   338→
+   339→Maximum 25 claims. Extrais les assertions les plus substantielles.`;
+   340→
+   341→async function extractClaimsFromDocument(env, documentId, content, docType) {
+   342→  try {
+   343→    // Tronquer le contenu pour rester dans les limites du contexte
+   344→    const maxChars = 25000; // ~6000 mots
+   345→    const truncatedContent = content.length > maxChars
+   346→      ? content.substring(0, maxChars) + '\n\n[... document tronqué ...]'
+   347→      : content;
+   348→
+   349→    const userPrompt = `Voici un ${docType} à analyser. Extrais les assertions substantielles :\n\n---\n${truncatedContent}\n---\n\nProduis le JSON des claims.`;
+   350→
+   351→    const result = await callAI(env, CLAIM_EXTRACTION_SYSTEM, userPrompt, false, 'extraction');
+   352→    let jsonStr = result.trim();
+   353→
+   354→    // Parser JSON robuste
+   355→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   356→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   357→    if (!jsonStr.startsWith('{')) {
+   358→      const firstBrace = jsonStr.indexOf('{');
+   359→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   360→    }
+   361→
+   362→    const parsed = JSON.parse(jsonStr);
+   363→    const claims = parsed.claims || [];
+   364→
+   365→    if (claims.length === 0) {
+   366→      return { claims: [], provider: 'unknown', warning: 'Aucune claim extraite' };
+   367→    }
+   368→
+   369→    // Stocker les claims en D1
+   370→    const timestamp = now();
+   371→    for (let i = 0; i < claims.length; i++) {
+   372→      const c = claims[i];
+   373→      const claimId = generateId('claim');
+   374→      const topicNorm = normalizeTopic(c.topic || 'sans_theme');
+   375→
+   376→      await env.DB.prepare(`
+   377→        INSERT INTO claims (id, document_id, claim_text, claim_type, topic, stance, epistemic_status, confidence, evidence_summary, temporal_start, temporal_end, created_at, updated_at)
+   378→        VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?, ?, ?, ?)
+   379→      `).bind(
+   380→        claimId, documentId,
+   381→        c.claim_text?.substring(0, 2000) || '',
+   382→        c.claim_type || 'position',
+   383→        c.topic?.substring(0, 100) || 'sans_theme',
+   384→        c.stance || 'neutre',
+   385→        Math.min(1.0, Math.max(0.0, c.confidence || 0.5)),
+   386→        c.evidence_summary?.substring(0, 500) || '',
+   387→        c.temporal_start || null,
+   388→        c.temporal_end || null,
+   389→        timestamp, timestamp,
+   390→      ).run();
+   391→
+   392→      // Index thématique
+   393→      await env.DB.prepare(`
+   394→        INSERT INTO topic_index (id, topic, topic_normalized, claim_id, document_id, claim_type, epistemic_status, created_at)
+   395→        VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?)
+   396→      `).bind(
+   397→        generateId('tpi'),
+   398→        c.topic?.substring(0, 100) || 'sans_theme',
+   399→        topicNorm,
+   400→        claimId, documentId,
+   401→        c.claim_type || 'position',
+   402→        timestamp,
+   403→      ).run();
+   404→    }
+   405→
+   406→    // 6. Cross-référence avec les claims existants (détecter contradictions, supports, etc.)
+   407→    await crossReferenceNewClaims(env, claims, documentId);
+   408→
+   409→    return { claims, provider: 'ai', count: claims.length };
+   410→  } catch (err) {
+   411→    console.error(`[DocMemory] Extraction IA échouée pour ${documentId}: ${err.message}`);
+   412→    return { claims: [], error: err.message };
+   413→  }
+   414→}
+   415→
+   416→// ============================================================
+   417→// CROSS-RÉFÉRENCE — Comparer nouvelles claims avec existantes
+   418→// ============================================================
+   419→
+   420→const CROSSREF_SYSTEM = `Tu es un analyste épistémique scientifique. Tu compares de nouvelles assertions (extraites d'un document) avec des assertions existantes d'une organisation politique.
+   421→
+   422→## TA MISSION
+   423→Pour chaque nouvelle assertion, vérifie si elle est en relation avec une assertion existante. Identifie les relations signifiantes uniquement (pas les trivialités).
+   424→
+   425→## TYPES DE RELATION
+   426→- **supports** : la nouvelle claim confirme/appuie l'existante (même position renforcée par de nouvelles preuves)
+   427→- **contradicts** : la nouvelle claim contredit l'existante (position opposée ou fait incompatible)
+   428→- **elaborates** : la nouvelle claim développe/précise l'existante (même idée mais plus détaillée)
+   429→- **qualifies** : la nouvelle claim nuance l'existante (ajoute des réserves ou des conditions)
+   430→- **supersedes** : la nouvelle claim remplace l'existante (position mise à jour, chiffre révisé)
+   431→- **contextualizes** : la nouvelle claim met l'existante en contexte (sans la modifier)
+   432→- **evolves_from** : la nouvelle claim est une évolution de l'existante (inflexion, changement progressif)
+   433→
+   434→## IMPACT ÉPISTÉMIQUE
+   435→Pour chaque relation, détermine l'impact sur le statut de l'assertion existante :
+   436→- Si "supports" avec preuves solides → **confirmed**
+   437→- Si "supports" avec preuves faibles → **no_change**
+   438→- Si "contradicts" de manière claire → **invalidated** ou **under_review**
+   439→- Si "contradicts" partiel → **weakened** ou **uncertain**
+   440→- Si "supersedes" → l'existante devient **superseded**
+   441→- Si "elaborates" ou "qualifies" → **no_change** (ajouter une note)
+   442→- Si "evolves_from" → **under_review** (nécessite analyse plus poussée)
+   443→
+   444→## FORMAT DE RÉPONSE
+   445→JSON STRICT :
+   446→{
+   447→  "relations": [
+   448→    {
+   449→      "new_claim_index": 0,
+   450→      "existing_claim_id": "claim_xxx",
+   451→      "relation_type": "supports|contradicts|elaborates|qualifies|supersedes|contextualizes|evolves_from",
+   452→      "epistemic_impact": "confirmed|weakened|invalidated|under_review|superseded|uncertain|no_change",
+   453→      "explanation": "explication brève de la relation et de son impact"
+   454→    }
+   455→  ]
+   456→}
+   457→
+   458→Identifie uniquement les relations SIGNIFICANTES (pas les correspondances triviales). Maximum 15 relations.`;
+   459→
+   460→async function crossReferenceNewClaims(env, newClaims, documentId) {
+   461→  if (!dbAvailable(env)) return;
+   462→
+   463→  try {
+   464→    // Récupérer les claims existants actifs (pas invalidated/superseded)
+   465→    const { results: existingClaims } = await env.DB.prepare(`
+   466→      SELECT id, claim_text, claim_type, topic, stance, epistemic_status, confidence
+   467→      FROM claims
+   468→      WHERE epistemic_status NOT IN ('invalidated', 'superseded')
+   469→        AND document_id != ?
+   470→      ORDER BY updated_at DESC
+   471→      LIMIT 30
+   472→    `).bind(documentId).all();
+   473→
+   474→    if (existingClaims.length === 0) return;
+   475→
+   476→    // Construire le prompt de cross-référence
+   477→    const existingText = existingClaims.map((c, i) =>
+   478→      `[${i}] id=${c.id} | type=${c.claim_type} | topic=${c.topic} | status=${c.epistemic_status} | "${c.claim_text.substring(0, 200)}"`
+   479→    ).join('\n');
+   480→
+   481→    const newText = newClaims.map((c, i) =>
+   482→      `[N${i}] type=${c.claim_type} | topic=${c.topic} | stance=${c.stance} | "${c.claim_text?.substring(0, 200)}"`
+   483→    ).join('\n');
+   484→
+   485→    const userPrompt = `## Assertions existantes de l'organisation\n${existingText}\n\n## Nouvelles assertions extraites\n${newText}\n\nIdentifie les relations significatives. Produis le JSON.`;
+   486→
+   487→    const result = await callAI(env, CROSSREF_SYSTEM, userPrompt, false, 'review');
+   488→    let jsonStr = result.trim();
+   489→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   490→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   491→    if (!jsonStr.startsWith('{')) {
+   492→      const firstBrace = jsonStr.indexOf('{');
+   493→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   494→    }
+   495→
+   496→    const parsed = JSON.parse(jsonStr);
+   497→    const relations = parsed.relations || [];
+   498→
+   499→    if (relations.length === 0) return;
+   500→
+   501→    // Appliquer les relations
+   502→    const timestamp = now();
+   503→    for (const rel of relations) {
+   504→      if (rel.new_claim_index >= newClaims.length) continue;
+   505→      const existingClaim = existingClaims.find(c => c.id === rel.existing_claim_id);
+   506→      if (!existingClaim) continue;
+   507→
+   508→      // Créer la relation (bidirectionnelle)
+   509→      const relId1 = generateId('rel');
+   510→      await env.DB.prepare(`
+   511→        INSERT INTO claim_relations (id, from_claim_id, to_claim_id, relation_type, evidence, auto_detected, created_at)
+   512→        VALUES (?, ?, ?, ?, ?, 1, ?)
+   513→      `).bind(relId1, `new_${rel.new_claim_index}`, rel.existing_claim_id, rel.relation_type, rel.explanation?.substring(0, 300) || '', timestamp).run();
+   514→
+   515→      // Appliquer l'impact épistémique si significatif
+   516→      if (rel.epistemic_impact && rel.epistemic_impact !== 'no_change') {
+   517→        await env.DB.prepare(`
+   518→          UPDATE claims SET epistemic_status = ?, updated_at = ? WHERE id = ?
+   519→        `).bind(rel.epistemic_impact, timestamp, rel.existing_claim_id).run();
+   520→
+   521→        // Mettre à jour l'index thématique
+   522→        await env.DB.prepare(`
+   523→          UPDATE topic_index SET epistemic_status = ? WHERE claim_id = ?
+   524→        `).bind(rel.epistemic_impact, rel.existing_claim_id).run();
+   525→
+   526→        // Ajouter une entrée au journal d'analyse
+   527→        const journalId = generateId('aj');
+   528→        await env.DB.prepare(`
+   529→          INSERT INTO analysis_journal (id, claim_id, journal_type, content, evidence_sources, trigger_source, created_at)
+   530→          VALUES (?, ?, ?, ?, ?, 'cross_reference', ?)
+   531→        `).bind(
+   532→          journalId,
+   533→          rel.existing_claim_id,
+   534→          rel.epistemic_impact === 'confirmed' ? 'confirmation' :
+   535→          rel.epistemic_impact === 'invalidated' ? 'invalidation' :
+   536→          rel.epistemic_impact === 'weakened' ? 'adjustment' :
+   537→          rel.epistemic_impact === 'uncertain' ? 'uncertainty_detected' :
+   538→          rel.epistemic_impact === 'superseded' ? 'invalidation' : 'adjustment',
+   539→          `${rel.relation_type}: ${rel.explanation || 'relation détectée lors de l\'ingestion d\'un nouveau document'}`,
+   540→          JSON.stringify([{ document_id: documentId, new_claim_index: rel.new_claim_index }]),
+   541→          timestamp,
+   542→        ).run();
+   543→      }
+   544→    }
+   545→
+   546→    console.log(`[DocMemory] Cross-référence: ${relations.length} relations détectées`);
+   547→  } catch (err) {
+   548→    console.warn(`[DocMemory] Cross-référence échouée (non bloquante): ${err.message}`);
+   549→  }
+   550→}
+   551→
+   552→// ============================================================
+   553→// CONTEXTE POUR LE PIPELINE — Claims pertinents pour les thèmes du jour
+   554→// ============================================================
+   555→
+   556→/**
+   557→ * Construit le contexte mémoire documentaire pour les thèmes d'aujourd'hui.
+   558→ * Appelé par le pipeline (phaseDraft) pour injecter les positions de l'org.
+   559→ */
+   560→export async function getDocMemoryContext(env, todayThemes, maxClaims = 8) {
+   561→  if (!dbAvailable(env)) return null;
+   562→
+   563→  try {
+   564→    const timestamp = now();
+   565→    const activeStatuses = ['proposed', 'confirmed', 'under_review', 'weakened', 'uncertain'];
+   566→
+   567→    // Pour chaque thème, chercher des claims correspondants
+   568→    const allMatchingClaims = [];
+   569→    const seenClaimIds = new Set();
+   570→
+   571→    for (const theme of todayThemes.slice(0, 6)) {
+   572→      const topicNorm = `%${normalizeTopic(theme)}%`;
+   573→
+   574→      // Recherche D1 par topic
+   575→      const { results: claims } = await env.DB.prepare(`
+   576→        SELECT c.claim_text, c.claim_type, c.topic, c.stance, c.epistemic_status, c.confidence,
+   577→               c.evidence_summary, c.temporal_start, d.title as doc_title, d.doc_date
+   578→        FROM claims c
+   579→        JOIN documents d ON c.document_id = d.id
+   580→        WHERE c.topic LIKE ? OR c.claim_text LIKE ?
+   581→          AND c.epistemic_status IN (${activeStatuses.map(() => '?').join(',')})
+   582→        ORDER BY
+   583→          CASE c.epistemic_status
+   584→            WHEN 'confirmed' THEN 1
+   585→            WHEN 'proposed' THEN 2
+   586→            WHEN 'under_review' THEN 3
+   587→            WHEN 'uncertain' THEN 4
+   588→            WHEN 'weakened' THEN 5
+   589→            ELSE 6
+   590→          END,
+   591→          c.confidence DESC
+   592→        LIMIT 3
+   593→      `).bind(topicNorm, topicNorm, ...activeStatuses).all();
+   594→
+   595→      for (const claim of claims) {
+   596→        if (!seenClaimIds.has(claim.claim_text?.substring(0, 80))) {
+   597→          seenClaimIds.add(claim.claim_text?.substring(0, 80));
+   598→          allMatchingClaims.push(claim);
+   599→        }
+   600→      }
+   601→    }
+   602→
+   603→    if (allMatchingClaims.length === 0) return null;
+   604→
+   605→    // Trouver les contradictions récentes (journal des derniers 30 jours)
+   606→    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+   607→    const { results: recentEvents } = await env.DB.prepare(`
+   608→      SELECT aj.journal_type, aj.content, aj.trigger_source,
+   609→             c.claim_text, c.topic, c.epistemic_status
+   610→      FROM analysis_journal aj
+   611→      JOIN claims c ON aj.claim_id = c.id
+   612→      WHERE aj.created_at > ?
+   613→        AND aj.journal_type IN ('invalidation', 'contradiction_new', 'uncertainty_detected')
+   614→      ORDER BY aj.created_at DESC
+   615→      LIMIT 5
+   616→    `).bind(thirtyDaysAgo).all();
+   617→
+   618→    // Trouver les rétro-références vers les revues passées
+   619→    const retroRefs = await findRetroReferences(env, todayThemes, 3);
+   620→
+   621→    return buildDocMemoryContextString(allMatchingClaims.slice(0, maxClaims), recentEvents, retroRefs);
+   622→  } catch (err) {
+   623→    console.warn(`[DocMemory] getDocMemoryContext échoué: ${err.message}`);
+   624→    return null;
+   625→  }
+   626→}
+   627→
+   628→/**
+   629→ * Trouve des revues de presse passées qui couvraient les mêmes thèmes
+   630→ * pour créer des rétro-références
+   631→ */
+   632→async function findRetroReferences(env, themes, limit = 3) {
+   633→  const refs = [];
+   634→
+   635→  try {
+   636→    // Chercher dans l'index D1 des revues de presse
+   637→    if (dbAvailable(env)) {
+   638→      const { results: priEntries } = await env.DB.prepare(`
+   639→        SELECT date, themes FROM press_review_index
+   640→        ORDER BY date DESC
+   641→        LIMIT 14
+   642→      `).all();
+   643→
+   644→      for (const entry of priEntries) {
+   645→        if (refs.length >= limit) break;
+   646→        try {
+   647→          const entryThemes = JSON.parse(entry.themes || '[]');
+   648→          const overlap = themes.some(t => {
+   649→            const tNorm = normalizeTopic(t);
+   650→            return entryThemes.some(et => normalizeTopic(et).includes(tNorm) || tNorm.includes(normalizeTopic(et)));
+   651→          });
+   652→
+   653→          if (overlap) {
+   654→            refs.push({ date: entry.date, themes: entryThemes.slice(0, 3) });
+   655→          }
+   656→        } catch (_) {}
+   657→      }
+   658→    }
+   659→
+   660→    // Compléter avec les mémoires KV si pas assez de résultats
+   661→    if (refs.length < limit) {
+   662→      const indexRaw = await env.CACHE.get('memory:day_index');
+   663→      if (indexRaw) {
+   664→        const index = JSON.parse(indexRaw);
+   665→        const today = new Date().toISOString().split('T')[0];
+   666→        const recentDays = (index.days || [])
+   667→          .filter(d => d < today)
+   668→          .slice(-14)
+   669→          .reverse();
+   670→
+   671→        for (const dateStr of recentDays) {
+   672→          if (refs.length >= limit) break;
+   673→          const raw = await env.CACHE.get(`memory:day:${dateStr}`);
+   674→          if (!raw) continue;
+   675→          const mem = JSON.parse(raw);
+   676→          const overlap = themes.some(t => {
+   677→            const tNorm = normalizeTopic(t);
+   678→            return mem.themes.some(mt => normalizeTopic(mt).includes(tNorm) || tNorm.includes(normalizeTopic(mt)));
+   679→          });
+   680→          if (overlap) {
+   681→            refs.push({ date: dateStr, themes: mem.themes.slice(0, 3), source: 'kv' });
+   682→          }
+   683→        }
+   684→      }
+   685→    }
+   686→  } catch (err) {
+   687→    console.warn(`[DocMemory] findRetroReferences échoué: ${err.message}`);
+   688→  }
+   689→
+   690→  return refs;
+   691→}
+   692→
+   693→function buildDocMemoryContextString(claims, recentEvents, retroRefs) {
+   694→  let ctx = '\n## MÉMOIRE DOCUMENTAIRE (positions et analyses de l\'organisation)\n\n';
+   695→
+   696→  // 1. Claims pertinents
+   697→  if (claims.length > 0) {
+   698→    ctx += '### Positions et analyses documentées sur les thèmes du jour\n';
+   699→    ctx += 'Ces assertions sont extraites des documents de l\'organisation. Utilise-les pour contextualiser l\'actualité.\n\n';
+   700→
+   701→    for (const c of claims) {
+   702→      const statusIcon = {
+   703→        confirmed: '[CONFIRMÉ]',
+   704→        proposed: '[PROPOSÉ]',
+   705→        under_review: '[EN EXAMEN]',
+   706→        weakened: '[AFFAIBLI]',
+   707→        uncertain: '[INCERTAIN]',
+   708→      }[c.epistemic_status] || '';
+   709→
+   710→      const stanceLabel = {
+   711→        pour: '[POUR]', contre: '[CONTRE]', nuance: '[NUANCÉ]',
+   712→        neutre: '', critique: '[CRITIQUE]', ambivalent: '[AMBIGU]',
+   713→      }[c.stance] || '';
+   714→
+   715→      ctx += `- ${statusIcon}${stanceLabel} **${c.topic}** (${c.claim_type}) : `;
+   716→      ctx += `"${c.claim_text.substring(0, 250)}${c.claim_text.length > 250 ? '...' : ''}"`;
+   717→      if (c.doc_title) ctx += ` — *${c.doc_title}*`;
+   718→      if (c.doc_date) ctx += ` (${c.doc_date})`;
+   719→      ctx += '\n';
+   720→    }
+   721→    ctx += '\n';
+   722→  }
+   723→
+   724→  // 2. Événements épistémiques récents (contradictions, invalidations)
+   725→  if (recentEvents?.length > 0) {
+   726→    ctx += '### Évolutions épistémiques récentes (30 derniers jours)\n';
+   727→    ctx += 'Ces éléments ont vu leur statut évoluer récemment. Reste prudent dans leur utilisation.\n\n';
+   728→    for (const evt of recentEvents) {
+   729→      const typeLabel = {
+   730→        invalidation: 'Invalidation',
+   731→        contradiction_new: 'Contradiction détectée',
+   732→        uncertainty_detected: 'Incertitude',
+   733→      }[evt.journal_type] || evt.journal_type;
+   734→
+   735→      ctx += `- [${typeLabel}] **${evt.topic}** : ${evt.content.substring(0, 150)}\n`;
+   736→    }
+   737→    ctx += '\n';
+   738→  }
+   739→
+   740→  // 3. Rétro-références vers les revues passées
+   741→  if (retroRefs?.length > 0) {
+   742→    ctx += '### Rétro-références (analyses précédentes sur ces thèmes)\n';
+   743→    ctx += 'Ces thèmes ont été couverts dans des revues précédentes. Situe l\'évolution.\n\n';
+   744→    for (const ref of retroRefs) {
+   745→      const themesStr = ref.themes.slice(0, 2).join(', ');
+   746→      ctx += `- **${ref.date}** : ${themesStr}`;
+   747→      if (ref.source) ctx += ` [${ref.source}]`;
+   748→      ctx += '\n';
+   749→    }
+   750→    ctx += '\n';
+   751→  }
+   752→
+   753→  // Instructions d'utilisation
+   754→  ctx += '### Instructions mémoire documentaire\n';
+   755→  ctx += '- Si l\'actualité du jour CONFIRME une position documentée, mentionne-le avec la source\n';
+   756→  ctx += '- Si l\'actualité CONTREDIT une position, signale-le avec prudence et nuance\n';
+   757→  ctx += '- Les claims [EN EXAMEN] ou [INCERTAIN] nécessitent une mention prudente\n';
+   758→  ctx += '- Les claims [AFFAIBLI] doivent être présentées avec réserve\n';
+   759→  ctx += '- Pour les rétro-références, indique si la situation a évolué depuis la date mentionnée\n';
+   760→  ctx += '- Ne répète PAS les positions documentées mot pour mot ; intègre-les dans l\'analyse\n';
+   761→  ctx += '- En cas de contradiction entre actualité et documentation, ne prends pas parti mais signale l\'écart\n';
+   762→
+   763→  return ctx;
+   764→}
+   765→
+   766→// ============================================================
+   767→// CROSS-RÉFÉRENCE AVEC LA REVUE DE PRESSE QUOTIDIENNE
+   768→// Appelé après la synthèse pour mettre à jour les statuts épistémiques
+   769→// ============================================================
+   770→
+   771→/**
+   772→ * Compare le contenu de la revue de presse du jour avec les claims existants.
+   773→ * Détecte : confirmations, invalidations, nouveaux éléments.
+   774→ */
+   775→export async function crossReferenceWithPressReview(env, reviewContent, themes, date) {
+   776→  if (!dbAvailable(env)) return { updated: 0 };
+   777→
+   778→  try {
+   779→    const timestamp = now();
+   780→    // Récupérer les claims actifs sur les thèmes du jour
+   781→    const activeStatuses = ['proposed', 'confirmed', 'under_review', 'weakened', 'uncertain'];
+   782→
+   783→    // Construire la requête pour chercher des claims pertinents
+   784→    const topicConditions = themes.slice(0, 5).map(() => 'c.topic LIKE ?').join(' OR ');
+   785→    if (!topicConditions) return { updated: 0 };
+   786→
+   787→    const topicParams = themes.slice(0, 5).map(t => `%${normalizeTopic(t)}%`);
+   788→    const query = `
+   789→      SELECT c.id, c.claim_text, c.topic, c.epistemic_status, c.claim_type, c.confidence
+   790→      FROM claims c
+   791→      WHERE (${topicConditions})
+   792→        AND c.epistemic_status IN (${activeStatuses.map(() => '?').join(',')})
+   793→      ORDER BY c.updated_at DESC
+   794→      LIMIT 15
+   795→    `;
+   796→
+   797→    const { results: relevantClaims } = await env.DB.prepare(query)
+   798→      .bind(...topicParams, ...activeStatuses)
+   799→      .all();
+   800→
+   801→    if (relevantClaims.length === 0) return { updated: 0 };
+   802→
+   803→    // Appel IA pour comparer la revue avec les claims
+   804→    const claimsText = relevantClaims.map(c =>
+   805→      `[${c.id}] (${c.epistemic_status}) ${c.topic}: "${c.claim_text.substring(0, 200)}"`
+   806→    ).join('\n');
+   807→
+   808→    const crossRefPrompt = `Tu es un analyste épistémique. Compare cette revue de presse du jour avec les positions existantes de l'organisation.
+   809→
+   810→## Positions existantes
+   811→${claimsText}
+   812→
+   813→## Revue de presse du jour (extrait)
+   814→${reviewContent.substring(0, 8000)}
+   815→
+   816→Pour chaque position existante, détermine si la revue de presse du jour :
+   817→- **confirme** la position (l'actualité va dans le même sens)
+   818→- **contredit** la position (l'actualité montre le contraire)
+   819→- **nuance** la position (l'actualité apporte des éléments nouveaux)
+   820→- **sans relation** (pas de lien direct)
+   821→
+   822→Réponse JSON STRICT :
+   823→{
+   824→  "assessments": [
+   825→    {
+   826→      "claim_id": "claim_xxx",
+   827→      "assessment": "confirme|contredit|nuance|sans_relation",
+   828→      "evidence": "citation brève de la revue de presse pertinente",
+   829→      "epistemic_impact": "confirmed|weakened|invalidated|uncertain|no_change",
+   830→      "explanation": "explication en une phrase"
+   831→    }
+   832→  ]
+   833→}
+   834→
+   835→Maximum 10 assessments. "sans_relation" = skip (ne pas inclure).`;
+   836→
+   837→    const result = await callAI(env, crossRefPrompt, '', false, 'review');
+   838→    let jsonStr = result.trim();
+   839→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   840→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   841→    if (!jsonStr.startsWith('{')) {
+   842→      const firstBrace = jsonStr.indexOf('{');
+   843→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   844→    }
+   845→
+   846→    const parsed = JSON.parse(jsonStr);
+   847→    const assessments = (parsed.assessments || []).filter(a => a.assessment !== 'sans_relation');
+   848→    let updatedCount = 0;
+   849→
+   850→    for (const assessment of assessments) {
+   851→      if (assessment.epistemic_impact && assessment.epistemic_impact !== 'no_change') {
+   852→        await env.DB.prepare(`
+   853→          UPDATE claims SET epistemic_status = ?, updated_at = ? WHERE id = ?
+   854→        `).bind(assessment.epistemic_impact, timestamp, assessment.claim_id).run();
+   855→
+   856→        await env.DB.prepare(`
+   857→          UPDATE topic_index SET epistemic_status = ? WHERE claim_id = ?
+   858→        `).bind(assessment.epistemic_impact, assessment.claim_id).run();
+   859→
+   860→        // Journal
+   861→        await env.DB.prepare(`
+   862→          INSERT INTO analysis_journal (id, claim_id, journal_type, content, evidence_sources, trigger_source, created_at)
+   863→          VALUES (?, ?, ?, ?, ?, 'press_review', ?)
+   864→        `).bind(
+   865→          generateId('aj'),
+   866→          assessment.claim_id,
+   867→          assessment.epistemic_impact === 'confirmed' ? 'confirmation' :
+   868→          assessment.epistemic_impact === 'invalidated' ? 'invalidation' :
+   869→          assessment.epistemic_impact === 'weakened' ? 'adjustment' :
+   870→          assessment.epistemic_impact === 'uncertain' ? 'uncertainty_detected' : 'adjustment',
+   871→          `${assessment.assessment}: ${assessment.explanation || 'mise à jour suite à la revue de presse'}`,
+   872→          JSON.stringify([{ evidence: assessment.evidence?.substring(0, 200), date }]),
+   873→          timestamp,
+   874→        ).run();
+   875→
+   876→        updatedCount++;
+   877→      }
+   878→    }
+   879→
+   880→    // Indexer la revue de presse dans D1
+   881→    const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+   882→    try {
+   883→      await env.DB.prepare(`
+   884→        INSERT OR REPLACE INTO press_review_index (id, date, themes, created_at)
+   885→        VALUES (?, ?, ?, ?)
+   886→      `).bind(`pri_${dateStr}`, dateStr, JSON.stringify(themes), timestamp).run();
+   887→    } catch (_) {}
+   888→
+   889→    console.log(`[DocMemory] Cross-ref revue: ${updatedCount} claims mis à jour`);
+   890→    return { updated: updatedCount, assessed: assessments.length };
+   891→  } catch (err) {
+   892→    console.warn(`[DocMemory] crossReferenceWithPressReview échoué: ${err.message}`);
+   893→    return { updated: 0, error: err.message };
+   894→  }
+   895→}
+   896→
+   897→// ============================================================
+   898→// PROSPECTIVE — Analyse des tendances à partir des claims
+   899→// ============================================================
+   900→
+   901→/**
+   902→ * Génère une analyse prospective basée sur l'évolution des claims
+   903→ * Appelé pendant le dream/distillation
+   904→ */
+   905→export async function generateProspective(env, daysBack = 30) {
+   906→  if (!dbAvailable(env)) return null;
+   907→
+   908→  try {
+   909→    // Récupérer les claims avec évolution récente
+   910→    const sinceDate = new Date(Date.now() - daysBack * 24 * 3600 * 1000).toISOString();
+   911→
+   912→    const { results: journalEntries } = await env.DB.prepare(`
+   913→      SELECT aj.journal_type, aj.content, aj.trigger_source, aj.created_at,
+   914→             c.topic, c.claim_type, c.epistemic_status, c.claim_text
+   915→      FROM analysis_journal aj
+   916→      JOIN claims c ON aj.claim_id = c.id
+   917→      WHERE aj.created_at > ?
+   918→      ORDER BY aj.created_at DESC
+   919→      LIMIT 40
+   920→    `).bind(sinceDate).all();
+   921→
+   922→    if (journalEntries.length < 5) return null;
+   923→
+   924→    // Grouper par thème
+   925→    const byTopic = {};
+   926→    for (const entry of journalEntries) {
+   927→      const topic = entry.topic || 'sans_theme';
+   928→      if (!byTopic[topic]) byTopic[topic] = [];
+   929→      byTopic[topic].push(entry);
+   930→    }
+   931→
+   932→    // Demander à l'IA une analyse prospective
+   933→    const material = Object.entries(byTopic)
+   934→      .sort((a, b) => b[1].length - a[1].length)
+   935→      .slice(0, 8)
+   936→      .map(([topic, entries]) => {
+   937→        const events = entries.slice(0, 5).map(e =>
+   938→          `[${e.created_at?.split('T')[0]}] ${e.journal_type}: ${e.content.substring(0, 100)}`
+   939→        ).join('\n  ');
+   940→        return `**${topic}** (${entries.length} événements):\n  ${events}`;
+   941→      }).join('\n\n');
+   942→
+   943→    const prospectivePrompt = `Tu es un analyste prospectif pour une organisation politique. À partir du journal d'évolution des positions et analyses, identifie les tendances et projette les évolutions probables.
+   944→
+   945→## Journal des évolutions récentes
+   946→${material}
+   947→
+   948→## TA MISSION
+   949→Produis une analyse prospective PRUDENTE (pas de certitudes, seulement des tendances et hypothèses). JSON STRICT :
+   950→{
+   951→  "trends": [
+   952→    {
+   953→      "topic": "thème",
+   954→      "direction": "renforcement|affaiblissement|inflexion|stabilité|émergence",
+   955→      "confidence": 0.7,
+   956→      "observation": "ce qui justifie cette tendance",
+   957→      "projection": "ce qu'on peut anticiper (avec prudence)",
+   958→      "horizon": "court terme (1-2 semaines)|moyen terme (1-3 mois)|long terme (3+ mois)"
+   959→    }
+   960→  ],
+   961→  "cross_theme_insights": [
+   962→    "interaction observée entre deux thèmes (ex: économique et social)"
+   963→  ],
+   964→  "warnings": [
+   965→    "signal d'alerte ou risque identifié"
+   966→  ]
+   967→}
+   968→
+   969→Maximum 6 trends, 3 cross_theme_insights, 3 warnings. Sois PRUDENT : utilise "il semble", "tend à", "pourrait", "les indices suggèrent".`;
+   970→
+   971→    const result = await callAI(env, prospectivePrompt, '', false, 'dream');
+   972→    let jsonStr = result.trim();
+   973→    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+   974→    if (jsonMatch) jsonStr = jsonMatch[1].trim();
+   975→    if (!jsonStr.startsWith('{')) {
+   976→      const firstBrace = jsonStr.indexOf('{');
+   977→      if (firstBrace >= 0) jsonStr = jsonStr.substring(firstBrace);
+   978→    }
+   979→
+   980→    return JSON.parse(jsonStr);
+   981→  } catch (err) {
+   982→    console.warn(`[DocMemory] generateProspective échoué: ${err.message}`);
+   983→    return null;
+   984→  }
+   985→}
+   986→
+   987→// ============================================================
+   988→// RECHERCHE — Interroger la mémoire documentaire
+   989→// ============================================================
+   990→
+   991→/**
+   992→ * Recherche sémantique (Vectorize) ou textuelle (D1) dans les claims
+   993→ */
+   994→export async function searchClaims(env, {
+   995→  query = null,
+   996→  topic = null,
+   997→  status = null,
+   998→  type = null,
+   999→  stance = null,
+  1000→  limit = 10,
+  1001→}) {
+  1002→  if (!dbAvailable(env)) return { results: [], total: 0 };
+  1003→
+  1004→  try {
+  1005→    // Si Vectorize disponible et query fourni → recherche sémantique
+  1006→    if (vectorizeAvailable(env) && query) {
+  1007→      try {
+  1008→        const embedding = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: query });
+  1009→        const vectorResults = await env.VECTORIZE.query(embedding.data[0].embedding, {
+  1010→          topK: Math.min(limit, 20),
+  1011→          returnMetadata: true,
+  1012→        });
+  1013→
+  1014→        if (vectorResults.matches?.length > 0) {
+  1015→          const claimIds = vectorResults.matches.map(m => m.id);
+  1016→          const placeholders = claimIds.map(() => '?').join(',');
+  1017→          const { results } = await env.DB.prepare(`
+  1018→            SELECT c.*, d.title as doc_title, d.doc_date, d.doc_type
+  1019→            FROM claims c
+  1020→            JOIN documents d ON c.document_id = d.id
+  1021→            WHERE c.id IN (${placeholders})
+  1022→            ORDER BY c.updated_at DESC
+  1023→          `).bind(...claimIds).all();
+  1024→
+  1025→          return { results, total: results.length, method: 'semantic' };
+  1026→        }
+  1027→      } catch (e) {
+  1028→        console.warn(`[DocMemory] Vectorize échoué, fallback D1: ${e.message}`);
+  1029→      }
+  1030→    }
+  1031→
+  1032→    // Fallback : recherche D1 textuelle
+  1033→    let sql = `
+  1034→      SELECT c.*, d.title as doc_title, d.doc_date, d.doc_type
+  1035→      FROM claims c
+  1036→      JOIN documents d ON c.document_id = d.id
+  1037→      WHERE 1=1
+  1038→    `;
+  1039→    const params = [];
+  1040→
+  1041→    if (query) {
+  1042→      sql += ' AND (c.claim_text LIKE ? OR c.topic LIKE ? OR c.evidence_summary LIKE ?)';
+  1043→      const q = `%${query}%`;
+  1044→      params.push(q, q, q);
+  1045→    }
+  1046→    if (topic) {
+  1047→      sql += ' AND c.topic LIKE ?';
+  1048→      params.push(`%${topic}%`);
+  1049→    }
+  1050→    if (status) {
+  1051→      sql += ' AND c.epistemic_status = ?';
+  1052→      params.push(status);
+  1053→    }
+  1054→    if (type) {
+  1055→      sql += ' AND c.claim_type = ?';
+  1056→      params.push(type);
+  1057→    }
+  1058→    if (stance) {
+  1059→      sql += ' AND c.stance = ?';
+  1060→      params.push(stance);
+  1061→    }
+  1062→
+  1063→    sql += ' ORDER BY c.updated_at DESC LIMIT ?';
+  1064→    params.push(Math.min(limit, 50));
+  1065→
+  1066→    const { results } = await env.DB.prepare(sql).bind(...params).all();
+  1067→    return { results, total: results.length, method: 'textual' };
+  1068→  } catch (err) {
+  1069→    return { results: [], total: 0, error: err.message };
+  1070→  }
+  1071→}
+  1072→
+  1073→/**
+  1074→ * Liste les documents ingérés
+  1075→ */
+  1076→export async function listDocuments(env, { type = null, limit = 20, status = null } = {}) {
+  1077→  if (!dbAvailable(env)) return { documents: [], total: 0 };
+  1078→
+  1079→  try {
+  1080→    let sql = 'SELECT * FROM documents WHERE 1=1';
+  1081→    const params = [];
+  1082→
+  1083→    if (type) {
+  1084→      sql += ' AND doc_type = ?';
+  1085→      params.push(type);
+  1086→    }
+  1087→    if (status) {
+  1088→      sql += ' AND status = ?';
+  1089→      params.push(status);
+  1090→    }
+  1091→
+  1092→    sql += ' ORDER BY created_at DESC LIMIT ?';
+  1093→    params.push(Math.min(limit, 100));
+  1094→
+  1095→    const { results } = await env.DB.prepare(sql).bind(...params).all();
+  1096→
+  1097→    // Compter le total
+  1098→    const countSql = 'SELECT COUNT(*) as total FROM documents WHERE 1=1';
+  1099→    const countParams = [];
+  1100→    if (type) { /* we'll approximate */ }
+  1101→
+  1102→    return { documents: results, total: results.length };
+  1103→  } catch (err) {
+  1104→    return { documents: [], total: 0, error: err.message };
+  1105→  }
+  1106→}
+  1107→
+  1108→/**
+  1109→ * Détail d'un document avec ses claims
+  1110→ */
+  1111→export async function getDocumentDetail(env, documentId) {
+  1112→  if (!dbAvailable(env)) return null;
+  1113→
+  1114→  try {
+  1115→    const doc = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(documentId).first();
+  1116→    if (!doc) return null;
+  1117→
+  1118→    const { results: claims } = await env.DB.prepare(
+  1119→      'SELECT * FROM claims WHERE document_id = ? ORDER BY created_at'
+  1120→    ).bind(documentId).all();
+  1121→
+  1122→    const { results: relations } = await env.DB.prepare(`
+  1123→      SELECT cr.*, c2.claim_text as target_text, c2.topic as target_topic
+  1124→      FROM claim_relations cr
+  1125→      JOIN claims c2 ON cr.to_claim_id = c2.id
+  1126→      WHERE cr.from_claim_id IN (SELECT id FROM claims WHERE document_id = ?)
+  1127→         OR cr.to_claim_id IN (SELECT id FROM claims WHERE document_id = ?)
+  1128→    `).bind(documentId, documentId).all();
+  1129→
+  1130→    return { document: doc, claims, relations };
+  1131→  } catch (err) {
+  1132→    return { error: err.message };
+  1133→  }
+  1134→}
+  1135→
+  1136→// ============================================================
+  1137→// ADMIN — Statistiques et gestion
+  1138→// ============================================================
+  1139→
+  1140→export async function getDocMemoryStats(env) {
+  1141→  if (!dbAvailable(env)) {
+  1142→    return { available: false, message: 'D1 non configuré' };
+  1143→  }
+  1144→
+  1145→  try {
+  1146→    const docCount = await env.DB.prepare('SELECT COUNT(*) as c FROM documents').first();
+  1147→    const claimCount = await env.DB.prepare('SELECT COUNT(*) as c FROM claims').first();
+  1148→    const activeClaims = await env.DB.prepare(
+  1149→      "SELECT COUNT(*) as c FROM claims WHERE epistemic_status NOT IN ('invalidated', 'superseded')"
+  1150→    ).first();
+  1151→    const relationCount = await env.DB.prepare('SELECT COUNT(*) as c FROM claim_relations').first();
+  1152→    const journalCount = await env.DB.prepare('SELECT COUNT(*) as c FROM analysis_journal').first();
+  1153→
+  1154→    // Distribution par statut épistémique
+  1155→    const { results: statusDist } = await env.DB.prepare(`
+  1156→      SELECT epistemic_status, COUNT(*) as count FROM claims GROUP BY epistemic_status ORDER BY count DESC
+  1157→    `).all();
+  1158→
+  1159→    // Distribution par type
+  1160→    const { results: typeDist } = await env.DB.prepare(`
+  1161→      SELECT claim_type, COUNT(*) as count FROM claims GROUP BY claim_type ORDER BY count DESC
+  1162→    `).all();
+  1163→
+  1164→    // Documents par type
+  1165→    const { results: docTypes } = await env.DB.prepare(`
+  1166→      SELECT doc_type, COUNT(*) as count FROM documents GROUP BY doc_type ORDER BY count DESC
+  1167→    `).all();
+  1168→
+  1169→    // Journal récent (dernières 10 entrées)
+  1170→    const { results: recentJournal } = await env.DB.prepare(`
+  1171→      SELECT aj.*, c.topic, c.claim_text
+  1172→      FROM analysis_journal aj
+  1173→      LEFT JOIN claims c ON aj.claim_id = c.id
+  1174→      ORDER BY aj.created_at DESC
+  1175→      LIMIT 10
+  1176→    `).all();
+  1177→
+  1178→    return {
+  1179→      available: true,
+  1180→      documents: docCount?.c || 0,
+  1181→      claims: claimCount?.c || 0,
+  1182→      activeClaims: activeClaims?.c || 0,
+  1183→      relations: relationCount?.c || 0,
+  1184→      journalEntries: journalCount?.c || 0,
+  1185→      statusDistribution: statusDist,
+  1186→      typeDistribution: typeDist,
+  1187→      documentTypes: docTypes,
+  1188→      recentJournal: recentJournal,
+  1189→      vectorizeAvailable: vectorizeAvailable(env),
+  1190→    };
+  1191→  } catch (err) {
+  1192→    return { available: false, error: err.message };
+  1193→  }
+  1194→}
+  1195→
+  1196→/**
+  1197→ * Supprime un document et toutes ses dépendances (cascade)
+  1198→ */
+  1199→export async function deleteDocument(env, documentId) {
+  1200→  if (!dbAvailable(env)) return { error: 'D1 non configuré' };
+  1201→
+  1202→  try {
+  1203→    // R2 cleanup
+  1204→    if (env.DOCS_BUCKET) {
+  1205→      const doc = await env.DB.prepare('SELECT r2_key FROM documents WHERE id = ?').bind(documentId).first();
+  1206→      if (doc?.r2_key) {
+  1207→        await env.DOCS_BUCKET.delete(doc.r2_key);
+  1208→      }
+  1209→    }
+  1210→
+  1211→    await env.DB.prepare('DELETE FROM documents WHERE id = ?').bind(documentId).run();
+  1212→    return { success: true, deleted: documentId };
+  1213→  } catch (err) {
+  1214→    return { error: err.message };
+  1215→  }
+  1216→}
+  1217→
+  1218→/**
+  1219→ * Met à jour manuellement le statut épistémique d'un claim
+  1220→ */
+  1221→export async function updateClaimStatus(env, claimId, newStatus, reason = '') {
+  1222→  if (!dbAvailable(env)) return { error: 'D1 non configuré' };
+  1223→
+  1224→  const validStatuses = ['proposed', 'confirmed', 'weakened', 'invalidated', 'uncertain', 'superseded', 'under_review'];
+  1225→  if (!validStatuses.includes(newStatus)) {
+  1226→    return { error: `Statut invalide. Valeurs: ${validStatuses.join(', ')}` };
+  1227→  }
+  1228→
+  1229→  try {
+  1230→    await env.DB.prepare(`
+  1231→      UPDATE claims SET epistemic_status = ?, updated_at = ? WHERE id = ?
+  1232→    `).bind(newStatus, now(), claimId).run();
+  1233→
+  1234→    await env.DB.prepare(`
+  1235→      UPDATE topic_index SET epistemic_status = ? WHERE claim_id = ?
+  1236→    `).bind(newStatus, claimId).run();
+  1237→
+  1238→    // Journal
+  1239→    await env.DB.prepare(`
+  1240→      INSERT INTO analysis_journal (id, claim_id, journal_type, content, trigger_source, created_at)
+  1241→      VALUES (?, ?, 'adjustment', ?, 'manual', ?)
+  1242→    `).bind(generateId('aj'), claimId, `Statut changé en "${newStatus}". ${reason}`, now()).run();
+  1243→
+  1244→    return { success: true, claim_id: claimId, new_status: newStatus };
+  1245→  } catch (err) {
+  1246→    return { error: err.message };
+  1247→  }
+  1248→}
+  1249→
+  1250→// ============================================================
+  1251→// VECTORIZE — Indexation sémantique (optionnel)
+  1252→// ============================================================
+  1253→
+  1254→async function indexChunksInVectorize(env, docId, chunks, docType) {
+  1255→  if (!vectorizeAvailable(env)) return;
+  1256→
+  1257→  try {
+  1258→    const vectors = [];
+  1259→    for (let i = 0; i < chunks.length; i++) {
+  1260→      const chunkId = `${docId}_${String(i).padStart(3, '0')}`;
+  1261→      try {
+  1262→        const embedding = await env.AI.run('@cf/baai/bge-small-en-v1.5', {
+  1263→          text: chunks[i].content.substring(0, 2000),
+  1264→        });
+  1265→        if (embedding.data?.[0]?.embedding) {
+  1266→          vectors.push({
+  1267→            id: chunkId,
+  1268→            values: embedding.data[0].embedding,
+  1269→            metadata: {
+  1270→              document_id: docId,
+  1271→              doc_type: docType,
+  1272→              section: chunks[i].section?.substring(0, 100) || '',
+  1273→              chunk_index: i,
+  1274→            },
+  1275→          });
+  1276→        }
+  1277→      } catch (e) {
+  1278→        console.warn(`[DocMemory] Embedding échoué pour ${chunkId}: ${e.message}`);
+  1279→      }
+  1280→    }
+  1281→
+  1282→    if (vectors.length > 0) {
+  1283→      // Upsert par batch de 100
+  1284→      for (let i = 0; i < vectors.length; i += 100) {
+  1285→        const batch = vectors.slice(i, i + 100);
+  1286→        await env.VECTORIZE.upsert(batch);
+  1287→      }
+  1288→
+  1289→      // Mettre à jour les chunk IDs vectorize
+  1290→      for (const v of vectors) {
+  1291→        await env.DB.prepare(
+  1292→          'UPDATE doc_chunks SET vectorize_id = ? WHERE id = ?'
+  1293→        ).bind(v.id, v.id).run();
+  1294→      }
+  1295→
+  1296→      console.log(`[DocMemory] ${vectors.length} chunks indexés dans Vectorize`);
+  1297→    }
+  1298→  } catch (err) {
+  1299→    console.warn(`[DocMemory] Indexation Vectorize échouée (non bloquante): ${err.message}`);
+  1300→  }
+  1301→}

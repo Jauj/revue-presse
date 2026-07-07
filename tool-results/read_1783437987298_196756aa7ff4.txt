@@ -1,0 +1,688 @@
+     1→     1→     1→// ============================================================
+     2→     2→     2→// ai.js — Chain of Thought multi-étapes (Mixture-of-Agents)
+     3→     3→     3→// Providers : Groq (rapide, gratuit) → Gemini → Mistral → Workers AI
+     4→     4→     4→// v3.4.1 — Optimisation performance : Groq Llama 3.3 70B en 1er,
+     5→     5→     5→//           extraits réduits à 200 mots, max_tokens par étape
+     6→     6→     6→// ============================================================
+     7→     7→     7→
+     8→     8→     8→const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+     9→     9→     9→const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
+    10→    10→    10→const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+    11→    11→    11→
+    12→    12→    12→// ============================================================
+    13→    13→    13→// PROMPTS — Format Éditorial Analytique + Chain of Thought
+    14→    14→    14→// ============================================================
+    15→    15→    15→
+    16→    16→    16→const BASE_SYSTEM = `Tu es un rédacteur en chef avec 20 ans d'expérience en revue de presse francophone et internationale, spécialisé dans l'analyse éditoriale de fond.
+    17→    17→    17→
+    18→    18→    18→## RÈGLES RÉDACTIONNELLES (obligatoires)
+    19→    19→    19→1. **Ton analytique et engagé** : chaque éditorial est une analyse de fond, pas un résumé factuel. Tu croises les sources, tu identifies les dynamiques politiques, économiques et sociales.
+    20→    20→    20→2. **Citations entre guillemets** : ouvre chaque éditorial par une citation exacte d'un article source, entre guillemets français « \u00a0» et attribuée avec la source et (id="N").
+    21→    21→    21→3. **Paragraphes développés** : 3-5 phrases par paragraphe minimum. Chaque paragraphe développe UNE idée complète avec contexte, analyse et implications.
+    22→    22→    22→4. **Attribution systématique** : chaque fait est attribué. Référence les articles par (id="N") dans le corps du texte.
+    23→    23→    23→5. **Datage systématique** :
+    24→    24→    24→   - Date de publication de la source quand disponible
+    25→    25→    25→   - Date de l'événement rapporté (si différente de la date de publication)
+    26→    26→    26→   - Exemple : «\u00a0Le 28 juin, le Sénat a publié...\u00a0» (Le Monde, 30 juin) (id="12")
+    27→    27→    27→6. **Chiffres précis** : "3,2 millions" jamais "des millions"
+    28→    28→    28→7. **Voix active** : "Le gouvernement a annoncé" jamais "Une annonce a été faite"
+    29→    29→    29→8. **Connecteurs analytiques** : utilise "Cette séquence révèle", "La question n'est plus X mais Y", "Cette logique s'inscrit dans", "Plus largement", "En attendant".
+    30→    30→    30→
+    31→    31→    31→## GESTION DU BILINGUE FR/EN
+    32→    32→    32→- La revue est entièrement rédigée en français
+    33→    33→    33→- Les titres d'articles originaux restent dans leur langue (FR ou EN)
+    34→    34→    34→- Les sources anglophones sont résumées en français : "Selon Bloomberg..."`;
+    35→    35→    35→
+    36→    36→    36→// ============================================================
+    37→    37→    37→// ÉTAPE 1 : EXTRACTION — Structurer les faits clés de chaque article
+    38→    38→    38→// ============================================================
+    39→    39→    39→const STAGE1_PROMPT = `${BASE_SYSTEM}
+    40→    40→    40→
+    41→    41→    41→## TAACHE MISSION — ÉTAPE 1 (EXTRACTION)
+    42→    42→    42→Tu es le **Rédacteur Extracteur**. Tu reçois un ensemble d'articles bruts. Pour CHAQUE article, tu extrais :
+    43→    43→    43→1. L'événement clé (1 phrase, voix active)
+    44→    44→    44→2. Les données chiffrées mentionnées
+    45→    45→    45→3. Les acteurs principaux (personnes, organisations, pays)
+    46→    46→    46→4. L'enjeu (pourquoi c'est important, 1 phrase)
+    47→    47→    47→5. Le niveau d'importance : CRITIQUE / ÉLEVÉ / MODÉRÉ / FAIBLE
+    48→    48→    48→
+    49→    49→    49→## FORMAT DE SORTIE
+    50→    50→    50→Pour chaque article, produis EXACTEMENT ce format :
+    51→    51→    51→<fact id="N">
+    52→    52→    52→<event>[1 phrase événement clé]</event>
+    53→    53→    53→<figures>[données chiffrées ou "aucune"]</figures>
+    54→    54→    54→<actors>[liste acteurs]</actors>
+    55→    55→    55→<significance>[1 phrase pourquoi c'est important]</significance>
+    56→    56→    56→<importance>[CRITIQUE|ÉLEVÉ|MODÉRÉ|FAIBLE]</importance>
+    57→    57→    57→<theme_proposal>[thématique proposée en 2-3 mots]</theme_proposal>
+    58→    58→    58→</fact>
+    59→    59→    59→
+    60→    60→    60→IMPORTANT : Traite TOUS les articles. Ne rien inventer hors des articles fournis.`;
+    61→    61→    61→
+    62→    62→    62→// ============================================================
+    63→    63→    63→// ÉTAPE 2 : THÉMATISATION — Grouper, classer, identifier contradictions
+    64→    64→    64→// ============================================================
+    65→    65→    65→const STAGE2_PROMPT = `${BASE_SYSTEM}
+    66→    66→    66→
+    67→    67→    67→## TAACHE MISSION — ÉTAPE 2 (THÉMATISATION)
+    68→    68→    68→Tu es le **Rédacteur Thématicien**. Tu reçois des fiches structurées d'articles (résultat de l'étape 1).
+    69→    69→    69→Tu dois :
+    70→    70→    70→1. Regrouper les articles par **thème principal** (max 6 thèmes)
+    71→    71→    71→2. Pour chaque thème, classer les articles par importance
+    72→    72→    72→3. Identifier les **contradictions** entre sources (si deux sources disent le contraire)
+    73→    73→    73→4. Identifier les **angles manquants** dans la couverture
+    74→    74→    74→5. Produire une hiérarchie des thèmes (le plus important en premier)
+    75→    75→    75→
+    76→    76→    76→## FORMAT DE SORTIE
+    77→    77→    77→<themes>
+    78→    78→    78→<theme id="1" priority="1">
+    79→    79→    79→<name>[Nom du thème en 3-5 mots]</name>
+    80→    80→    80→<axiom>[Insight clé en GRAS, 2-5 mots qui résument le thème]</axiom>
+    81→    81→    81→<summary>[2-3 phrases de synthèse inter-sources]</summary>
+    82→    82→    82→<articles>[IDs des articles dans ce thème, séparés par virgule]</articles>
+    83→    83→    83→<significance>[Pourquoi ce thème domine l'actualité du jour]</significance>
+    84→    84→    84→</theme>
+    85→    85→    85→[...répéter pour chaque thème...]
+    86→    86→    86→</themes>
+    87→    87→    87→
+    88→    88→    88→<divergences>
+    89→    89→    89→[Si des sources se contredisent, les expliciter ici avec attribution]
+    90→    90→    90→[Si aucune divergence : "Aucune divergence significative identifiée"]
+    91→    91→    91→</divergences>
+    92→    92→    92→
+    93→    93→    93→<missing_angles>
+    94→    94→    94→[Perspectives ou angles non couverts par les sources]
+    95→    95→    95→</missing_angles>`;
+    96→    96→    96→
+    97→    97→    97→// ============================================================
+    98→    98→    98→// ÉTAPE 3 : RÉDACTION — Rédiger les sections éditoriales
+    99→    99→    99→// ============================================================
+   100→   100→   100→const STAGE3_PROMPT = `${BASE_SYSTEM}
+   101→   101→   101→
+   102→   102→   102→## TAACHE MISSION — ÉTAPE 3 (RÉDACTION ÉDITORIALE)
+   103→   103→   103→Tu es le **Rédacteur en Chef**. Tu reçois le regroupement thématique (étape 2) ET les articles originaux.
+   104→   104→   104→Tu rédiges une revue de presse éditoriale analytique COMPLÈTE.
+   105→   105→   105→
+   106→   106→   106→## FORMAT DE SORTIE OBLIGATOIRE
+   107→   107→   107→
+   108→   108→   108→**Sommaire**
+   109→   109→   109→
+   110→   110→   110→    [Titre de l'éditorial 1]
+   111→   111→   111→    [Titre de l'éditorial 2]
+   112→   112→   112→    [...]
+   113→   113→   113→
+   114→   114→   114→**1. [Titre éditorial 1 : sous-titre incisif]**
+   115→   115→   115→«\u00a0[Citation exacte d'un article, entre guillemets]\u00a0» — [Source] (id="N"). [Phrase de contexte qui situe l'événement avec SA DATE].
+   116→   116→   116→
+   117→   117→   117→[Paragraphe d'analyse 1 : 3-5 phrases développant le contexte, les enjeux, les acteurs. Croise au moins 2 sources. Date l'événement rapporté.]
+   118→   118→   118→
+   119→   119→   119→[Paragraphe d'analyse 2 : 3-5 phrases d'analyse plus profonde — implications, comparaisons historiques, dynamiques structurelles.]
+   120→   120→   120→
+   121→   121→   121→[Optionnel] Pour aller plus loin : [Élargissement du sujet avec une source supplémentaire (id="N").]
+   122→   122→   122→
+   123→   123→   123→---
+   124→   124→   124→Sources
+   125→   125→   125→
+   126→   126→   126→    «\u00a0[Titre exact de l'article]\u00a0» — [Nom de la source] — [URL] (id="N")
+   127→   127→   127→    «\u00a0[Titre exact]\u00a0» — [Source] — [URL] (id="N")
+   128→   128→   128→
+   129→   129→   129→🔍 Approfondir ce sujet
+   130→   130→   130→
+   131→   131→   131→**2. [Titre éditorial 2]**
+   132→   132→   132→[Même format complet]
+   133→   133→   133→
+   134→   134→   134→[...répéter pour chaque thème, max 9 éditoriaux...]
+   135→   135→   135→
+   136→   136→   136→**Points de tension**
+   137→   137→   137→
+   138→   138→   138→    1. **[Question ouverte 1]**
+   139→   139→   139→    [2-3 phrases d'analyse avec sources citées.]
+   140→   140→   140→    2. **[Question ouverte 2]**
+   141→   141→   141→    [2-3 phrases]
+   142→   142→   142→    [...max 5 points de tension...]
+   143→   143→   143→
+   144→   144→   144→**À surveiller**
+   145→   145→   145→
+   146→   146→   146→    1. **[Événement à suivre avec sa date si connue]**
+   147→   147→   147→    [1-2 phrases : pourquoi c'est important et quoi attendre]
+   148→   148→   148→    [...max 6 items...]
+   149→   149→   149→
+   150→   150→   150→## RÈGLES STRICTES
+   151→   151→   151→- Maximum 9 éditoriaux thématiques
+   152→   152→   152→- Chaque éditorial : 2-3 paragraphes d'analyse développée (3-5 phrases chacun)
+   153→   153→   153→- Ouvrir CHAQUE éditorial par une citation exacte entre guillemets «\u00a0...\u00a0» attribuée (source + id)
+   154→   154→   154→- Référencer les sources par (id="N") dans le corps du texte
+   155→   155→   155→- Dater SYSTEMATIQUEMENT : date de l'événement rapporté + date de publication de la source
+   156→   156→   156→- Section Sources à la fin de chaque éditorial avec titre exact, nom source, URL, (id="N")
+   157→   157→   157→- Ne RIEN inventer en dehors des articles fournis`;
+   158→   158→   158→
+   159→   159→   159→// ============================================================
+   160→   160→   160→// ÉTAPE 4 : REVUE CRITIQUE — Auto-évaluation rigoureuse
+   161→   161→   161→// ============================================================
+   162→   162→   162→const STAGE4_PROMPT = `Tu es un **Chef de Rédaction Critique** (Peer Reviewer). Tu reçois une revue de presse éditoriale rédigée et les articles sources.
+   163→   163→   163→Tu dois l'évaluer avec la plus grande rigueur et produire un rapport de correction.
+   164→   164→   164→
+   165→   165→   165→## CRITÈRES D'ÉVALUATION
+   166→   166→   166→1. **Exactitude factuelle** : Chaque fait mentionné existe-t-il dans les articles sources ?
+   167→   167→   167→2. **Attribution** : Chaque affirmation est-elle attribuée à une source avec (id="N") ?
+   168→   168→   168→3. **Datage** : Chaque fait et chaque source sont-ils datés ? (date événement + date publication source)
+   169→   169→   169→4. **Citations** : Chaque éditorial s'ouvre-t-il par une citation exacte entre guillemets « ... » ?
+   170→   170→   170→5. **Complétude** : Des articles importants ont-ils été omis ?
+   171→   171→   171→6. **Divergences** : Les contradictions entre sources sont-elles bien signalées ?
+   172→   172→   172→7. **Qualité éditoriale** : Les éditoriaux sont-ils des analyses de fond développées (pas des bullet points) ?
+   173→   173→   173→8. **Format** : Sommaire, éditoriaux numérotés, Sources par éditorial, Points de tension, À surveiller ?
+   174→   174→   174→9. **Équilibre** : La diversité des sources est-elle respectée ?
+   175→   175→   175→
+   176→   176→   176→## FORMAT DE SORTIE (rapport structuré)
+   177→   177→   177→<review>
+   178→   178→   178→<score_global>[1-10]</score_global>
+   179→   179→   179→<problemes_faits>
+   180→   180→   180→[numéroté : chaque fait non vérifiable ou inventé]
+   181→   181→   181→</problemes_faits>
+   182→   182→   182→<problemes_datage>
+   183→   183→   183→[numéroté : chaque fait ou source non daté]
+   184→   184→   184→</problemes_datage>
+   185→   185→   185→<problemes_attribution>
+   186→   186→   186→[numéroté : chaque affirmation non attribuée ou (id) manquant]
+   187→   187→   187→</problemes_attribution>
+   188→   188→   188→<problemes_citations>
+   189→   189→   189→[numéroté : éditoriaux sans citation d'ouverture ou citation inexacte]
+   190→   190→   190→</problemes_citations>
+   191→   191→   191→<articles_omis>
+   192→   192→   192→[numéroté : articles importants non traités, avec titre et source]
+   193→   193→   193→</articles_omis>
+   194→   194→   194→<ameliorations_redactionnelles>
+   195→   195→   195→[suggestions concrètes pour améliorer chaque section]
+   196→   196→   196→</ameliorations_redactionnelles>
+   197→   197→   197→<revision_prioritaire>
+   198→   198→   198→[1-3 changements les plus importants à faire AVANT publication]
+   199→   199→   199→</revision_prioritaire>
+   200→   200→   200→</review>`;
+   201→   201→   201→
+   202→   202→   202→// ============================================================
+   203→   203→   203→// ÉTAPE 5 : SYNTHÈSE EIC — Production finale intégrant la revue
+   204→   204→   204→// ============================================================
+   205→   205→   205→const STAGE5_PROMPT = `${BASE_SYSTEM}
+   206→   206→   206→
+   207→   207→   207→## TAACHE MISSION — ÉTAPE 5 (SYNTHÈSE EDITOR-IN-CHIEF)
+   208→   208→   208→Tu es l'**Éditeur en Chef**. Tu as entre les mains :
+   209→   209→   209→- Un brouillon de revue de presse éditoriale
+   210→   210→   210→- Un rapport de relecture critique
+   211→   211→   211→
+   212→   212→   212→Tu produis la **VERSION FINALE** de la revue en intégrant TOUTES les corrections du rapport critique.
+   213→   213→   213→C'est cette version qui sera envoyée par email à des lecteurs exigeants.
+   214→   214→   214→
+   215→   215→   215→## CONSIGNES
+   216→   216→   216→1. Corriger TOUS les problèmes factuels signalés
+   217→   217→   217→2. Ajouter les articles omis identifiés
+   218→   218→   218→3. Appliquer TOUTES les améliorations rédactionnelles
+   219→   219→   219→4. Conserver le FORMAT ÉDITORIAL ANALYTIQUE EXACT (Sommaire, éditoriaux numérotés, Sources, Points de tension, À surveiller)
+   220→   220→   220→5. Si le rapport note un score < 7, réécrire les sections faibles
+   221→   221→   221→6. Vérifier que CHAQUE fait est daté (date événement + date source)
+   222→   222→   222→7. Vérifier que CHAQUE citation est exacte et entre guillemets «\u00a0...\u00a0»
+   223→   223→   223→8. Vérifier que les (id="N") correspondent aux bons articles
+   224→   224→   224→9. Ne RIEN inventer qui ne soit dans les articles sources
+   225→   225→   225→10. La version finale doit être IMPÉCATABLE
+   226→   226→   226→
+   227→   227→   227→## FORMAT DE SORTIE IDENTIQUE à l'Étape 3
+   228→   228→   228→Sommaire → Éditoriaux numérotés avec citations, analyse développée, Sources → Points de tension → À surveiller
+   229→   229→   229→
+   230→   230→   230→RAPPEL DES RÈGLES DE DATAGE :
+   231→   231→   231→- Toujours préciser la date de l'événement : «\u00a0Le 28 juin, le Sénat a publié...\u00a0»
+   232→   232→   232→- Toujours préciser la date de la source quand elle est disponible : (Le Monde, 30 juin)
+   233→   233→   233→- Format combiné : (id="N") avec date source entre parenthèses après le nom`;
+   234→   234→   234→
+   235→   235→   235→// ============================================================
+   236→   236→   236→// PROMPT UTILITAIRE : Construire les articles XML
+   237→   237→   237→// Extraits réduits à 200 mots (suffisant pour extraction/thématisation,
+   238→   238→   238→// le draft a accès au contenu filtré en KV si besoin)
+   239→   239→   239→// ============================================================
+   240→   240→   240→
+   241→   241→   241→/** Échappe les caractères XML dangereux pour éviter de casser le parsing */
+   242→   242→   242→function escapeXML(str) {
+   243→   243→   243→  return String(str)
+   244→   244→   244→    .replace(/&/g, '&amp;')
+   245→   245→   245→    .replace(/</g, '&lt;')
+   246→   246→   246→    .replace(/>/g, '&gt;')
+   247→   247→   247→    .replace(/"/g, '&quot;')
+   248→   248→   248→    .replace(/'/g, '&apos;');
+   249→   249→   249→}
+   250→   250→   250→
+   251→   251→   251→function formatDateForAI(dateStr) {
+   252→   252→   252→  if (!dateStr) return 'date inconnue';
+   253→   253→   253→  try {
+   254→   254→   254→    const d = new Date(dateStr);
+   255→   255→   255→    if (isNaN(d.getTime())) return dateStr;
+   256→   256→   256→    return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' });
+   257→   257→   257→  } catch { return dateStr; }
+   258→   258→   258→}
+   259→   259→   259→
+   260→   260→   260→function buildArticlesXML(articles, maxWordsPerArticle = 200) {
+   261→   261→   261→  let xml = `<articles count="${articles.length}">\n`;
+   262→   262→   262→  for (let i = 0; i < articles.length; i++) {
+   263→   263→   263→    const a = articles[i];
+   264→   264→   264→    const text = a.extractedText || a.description || '(indisponible)';
+   265→   265→   265→    const excerpt = text.split(/\s+/).slice(0, maxWordsPerArticle).join(' ');
+   266→   266→   266→    xml += `<article id="${i + 1}">\n`;
+   267→   267→   267→    xml += `<source>${escapeXML(a.sourceName)}</source>\n`;
+   268→   268→   268→    xml += `<lang>${escapeXML(a.sourceLang || 'fr')}</lang>\n`;
+   269→   269→   269→    xml += `<category>${escapeXML(a.sourceCategory || 'autre')}</category>\n`;
+   270→   270→   270→    xml += `<title>${escapeXML(a.title)}</title>\n`;
+   271→   271→   271→    xml += `<pub_date>${escapeXML(formatDateForAI(a.pubDate))}</pub_date>\n`;
+   272→   272→   272→    xml += `<content>\n${escapeXML(excerpt)}\n</content>\n`;
+   273→   273→   273→    if (a.link) xml += `<url>${escapeXML(a.link)}</url>\n`;
+   274→   274→   274→    xml += `</article>\n\n`;
+   275→   275→   275→  }
+   276→   276→   276→  xml += `</articles>`;
+   277→   277→   277→  return xml;
+   278→   278→   278→}
+   279→   279→   279→
+   280→   280→   280→// ============================================================
+   281→   281→   281→// Appels API — Cascade fallback Groq → Gemini → Mistral → Workers AI
+   282→   282→   282→// Groq (Llama 3.3 70B) : gratuit, <10s, idéal pour extraction/thèmes
+   283→   283→   283→// Gemini Flash : gratuit, fiable, bon pour les longues sorties
+   284→   284→   284→// Mistral : premium, lent sur gros volumes, fallback
+   285→   285→   285→// Workers AI : dernier recours, qualité variable
+   286→   286→   286→// ============================================================
+   287→   287→   287→
+   288→   288→   288→/**
+   289→   289→   289→ * max_tokens adapté par étape pour optimiser vitesse + qualité :
+   290→   290→   290→ * - Extraction : 4000 (format structuré compact)
+   291→   291→   291→ * - Thématisation : 6000 (XML structuré)
+   292→   292→   292→ * - Draft/Synthesis : 12000 (texte éditorial long)
+   293→   293→   293→ * - Review : 4000 (rapport structuré)
+   294→   294→   294→ */
+   295→   295→   295→const MAX_TOKENS_BY_STAGE = {
+   296→   296→   296→  extraction: 4000,
+   297→   297→   297→  theming: 6000,
+   298→   298→   298→  drafting: 12000,
+   299→   299→   299→  review: 4000,
+   300→   300→   300→  synthesis: 12000,
+   301→   301→   301→  dream: 4000,
+   302→   302→   302→  default: 8000,
+   303→   303→   303→};
+   304→   304→   304→
+   305→   305→   305→/** Appel IA format OpenAI-compatible (Groq, Mistral, etc.) */
+   306→   306→   306→async function callOpenAICompatible(endpoint, model, apiKey, systemPrompt, userPrompt, maxTokens = 8000) {
+   307→   307→   307→  const response = await fetch(endpoint, {
+   308→   308→   308→    method: 'POST',
+   309→   309→   309→    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+   310→   310→   310→    body: JSON.stringify({
+   311→   311→   311→      model,
+   312→   312→   312→      messages: [
+   313→   313→   313→        { role: 'system', content: systemPrompt },
+   314→   314→   314→        { role: 'user', content: userPrompt },
+   315→   315→   315→      ],
+   316→   316→   316→      temperature: 0.2,
+   317→   317→   317→      max_tokens: maxTokens,
+   318→   318→   318→      top_p: 0.9,
+   319→   319→   319→    }),
+   320→   320→   320→    signal: AbortSignal.timeout(180000),
+   321→   321→   321→  });
+   322→   322→   322→
+   323→   323→   323→  if (!response.ok) {
+   324→   324→   324→    const errBody = await response.text().catch(() => '');
+   325→   325→   325→    throw new Error(`HTTP ${response.status}: ${errBody.substring(0, 200)}`);
+   326→   326→   326→  }
+   327→   327→   327→  return (await response.json()).choices[0].message.content;
+   328→   328→   328→}
+   329→   329→   329→
+   330→   330→   330→/** Appel Gemini (API native) — timeout 180s */
+   331→   331→   331→async function callGemini(apiKey, systemPrompt, userPrompt, maxOutputTokens = 8000) {
+   332→   332→   332→  const url = `${GEMINI_ENDPOINT}?key=${apiKey}`;
+   333→   333→   333→  const response = await fetch(url, {
+   334→   334→   334→    method: 'POST',
+   335→   335→   335→    headers: { 'Content-Type': 'application/json' },
+   336→   336→   336→    body: JSON.stringify({
+   337→   337→   337→      contents: [{
+   338→   338→   338→        role: 'user',
+   339→   339→   339→        parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
+   340→   340→   340→      }],
+   341→   341→   341→      generationConfig: { temperature: 0.2, maxOutputTokens, topP: 0.9 },
+   342→   342→   342→    }),
+   343→   343→   343→    signal: AbortSignal.timeout(180000),
+   344→   344→   344→  });
+   345→   345→   345→  if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${await response.text()}`);
+   346→   346→   346→  const data = await response.json();
+   347→   347→   347→  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+   348→   348→   348→}
+   349→   349→   349→
+   350→   350→   350→/** Workers AI fallback */
+   351→   351→   351→async function callWorkersAI(env, prompt) {
+   352→   352→   352→  if (!env.AI) throw new Error('Workers AI non configuré');
+   353→   353→   353→  const models = ['@cf/meta/llama-4-scout-17b-16e-instruct', '@cf/meta/llama-3.1-8b-instruct'];
+   354→   354→   354→  for (const model of models) {
+   355→   355→   355→    try {
+   356→   356→   356→      const r = await env.AI.run(model, { prompt, max_tokens: 8000, temperature: 0.2 });
+   357→   357→   357→      const text = r.response || '';
+   358→   358→   358→      if (text.length > 100) return text;
+   359→   359→   359→    } catch (e) { /* skip */ }
+   360→   360→   360→  }
+   361→   361→   361→  throw new Error('Workers AI: tous modèles échoués');
+   362→   362→   362→}
+   363→   363→   363→
+   364→   364→   364→/**
+   365→   365→   365→ * Appel IA avec cascade fallback complète
+   366→   366→   366→ * Ordre : Groq (Llama 3.3 70B, <10s) → Gemini Flash → Mistral-medium → Mistral-large → Workers AI
+   367→   367→   367→ * Groq est gratuit et extrêmement rapide — parfait pour le pipeline CoT
+   368→   368→   368→ */
+   369→   369→   369→export async function callAI(env, systemPrompt, userPrompt, preferHighQuality = false, stageHint = 'default') {
+   370→   370→   370→  const providers = [];
+   371→   371→   371→  const maxTokens = MAX_TOKENS_BY_STAGE[stageHint] || MAX_TOKENS_BY_STAGE.default;
+   372→   372→   372→
+   373→   373→   373→  // 1. Groq — gratuit, Llama 3.3 70B, répond en <10s
+   374→   374→   374→  if (env.GROQ_API_KEY) {
+   375→   375→   375→    providers.push({ type: 'groq', model: 'llama-3.3-70b-versatile', key: env.GROQ_API_KEY, endpoint: GROQ_ENDPOINT });
+   376→   376→   376→  }
+   377→   377→   377→
+   378→   378→   378→  // 2. Gemini Flash — gratuit, fiable, bon sur gros volumes
+   379→   379→   379→  if (env.GEMINI_API_KEY) {
+   380→   380→   380→    providers.push({ type: 'gemini', model: 'gemini-2.0-flash', key: env.GEMINI_API_KEY });
+   381→   381→   381→  }
+   382→   382→   382→
+   383→   383→   383→  // 3. Mistral — premium, plus lent mais haute qualité
+   384→   384→   384→  if (env.MISTRAL_API_KEY) {
+   385→   385→   385→    // medium d'abord (plus rapide), large en backup
+   386→   386→   386→    providers.push({ type: 'mistral', model: 'mistral-medium-latest', key: env.MISTRAL_API_KEY, endpoint: MISTRAL_ENDPOINT });
+   387→   387→   387→    providers.push({ type: 'mistral', model: 'mistral-large-latest', key: env.MISTRAL_API_KEY, endpoint: MISTRAL_ENDPOINT });
+   388→   388→   388→  }
+   389→   389→   389→
+   390→   390→   390→  // 4. Workers AI — dernier recours
+   391→   391→   391→  providers.push({ type: 'workersai' });
+   392→   392→   392→
+   393→   393→   393→  const errors = [];
+   394→   394→   394→
+   395→   395→   395→  for (const provider of providers) {
+   396→   396→   396→    const startTime = Date.now();
+   397→   397→   397→    try {
+   398→   398→   398→      let result;
+   399→   399→   399→      if (provider.type === 'groq' || provider.type === 'mistral') {
+   400→   400→   400→        result = await callOpenAICompatible(provider.endpoint, provider.model, provider.key, systemPrompt, userPrompt, maxTokens);
+   401→   401→   401→      } else if (provider.type === 'gemini') {
+   402→   402→   402→        result = await callGemini(provider.key, systemPrompt, userPrompt, maxTokens);
+   403→   403→   403→      } else {
+   404→   404→   404→        result = await callWorkersAI(env, `${systemPrompt}\n\n${userPrompt}`);
+   405→   405→   405→      }
+   406→   406→   406→      const duration = Date.now() - startTime;
+   407→   407→   407→
+   408→   408→   408→      // Vérifier que le contenu est substantiel
+   409→   409→   409→      if (!result || result.trim().length < 50) {
+   410→   410→   410→        const errMsg = `${provider.type}: réponse vide ou trop courte (${(result || '').length} chars)`;
+   411→   411→   411→        errors.push(errMsg);
+   412→   412→   412→        console.warn(`[callAI] ${errMsg}`);
+   413→   413→   413→        continue;
+   414→   414→   414→      }
+   415→   415→   415→
+   416→   416→   416→      console.log(`[callAI] ✅ ${provider.type}/${provider.model} — ${result.length} chars en ${(duration/1000).toFixed(1)}s`);
+   417→   417→   417→      return { content: result, provider: provider.type, duration };
+   418→   418→   418→    } catch (err) {
+   419→   419→   419→      const duration = Date.now() - startTime;
+   420→   420→   420→      const errMsg = `${provider.type}: ${err.message}`;
+   421→   421→   421→      errors.push(errMsg);
+   422→   422→   422→      console.error(`[callAI] ❌ ${provider.type}/${provider.model || ''} — ${err.message} (après ${(duration/1000).toFixed(1)}s)`);
+   423→   423→   423→      continue;
+   424→   424→   424→    }
+   425→   425→   425→  }
+   426→   426→   426→
+   427→   427→   427→  throw new Error(`Tous les providers IA ont échoué: ${errors.join(' | ')}`);
+   428→   428→   428→}
+   429→   429→   429→
+   430→   430→   430→// ============================================================
+   431→   431→   431→// 5 ÉTAPES DU CHAIN OF THOUGHT
+   432→   432→   432→// ============================================================
+   433→   433→   433→
+   434→   434→   434→/**
+   435→   435→   435→ * ÉTAPE 1 : Extraction des faits structurés
+   436→   436→   436→ */
+   437→   437→   437→export async function stage1_extract(articles, env) {
+   438→   438→   438→  const xml = buildArticlesXML(articles, 200); // 200 mots suffit pour l'extraction
+   439→   439→   439→  const userPrompt = `Extrais les faits clés de ces ${articles.length} articles :\n\n${xml}`;
+   440→   440→   440→  const result = await callAI(env, STAGE1_PROMPT, userPrompt, true, 'extraction');
+   441→   441→   441→  return { stage: 'extraction', content: result.content, provider: result.provider, duration: result.duration };
+   442→   442→   442→}
+   443→   443→   443→
+   444→   444→   444→/**
+   445→   445→   445→ * ÉTAPE 2 : Thématisation et regroupement
+   446→   446→   446→ */
+   447→   447→   447→export async function stage2_theme(extraction, articles, env) {
+   448→   448→   448→  const xml = buildArticlesXML(articles, 200);
+   449→   449→   449→  const userPrompt = `Voici les fiches structurées extraites de ${articles.length} articles :\n\n${extraction}\n\n---\n\nArticles originaux pour référence :\n${xml}`;
+   450→   450→   450→  const result = await callAI(env, STAGE2_PROMPT, userPrompt, true, 'theming');
+   451→   451→   451→  return { stage: 'theming', content: result.content, provider: result.provider, duration: result.duration };
+   452→   452→   452→}
+   453→   453→   453→
+   454→   454→   454→/**
+   455→   455→   455→ * ÉTAPE 3 : Rédaction du brouillon éditorial
+   456→   456→   456→ * (optionnellement enrichi par recherche web et mémoire)
+   457→   457→   457→ */
+   458→   458→   458→export async function stage3_draft(themes, articles, env, webResearch = null, memoryContext = null) {
+   459→   459→   459→  const xml = buildArticlesXML(articles, 250); // un peu plus pour le draft (250 mots)
+   460→   460→   460→
+   461→   461→   461→  let userPrompt = `Voici le regroupement thématique :\n\n${themes}\n\n---\n\nArticles originaux :\n${xml}`;
+   462→   462→   462→
+   463→   463→   463→  // Ajouter les résultats de recherche web si disponibles
+   464→   464→   464→  if (webResearch && webResearch.length > 0) {
+   465→   465→   465→    userPrompt += `\n\n---\n\nRECHERCHE WEB COMPLÉMENTAIRE :\nLes articles ci-dessus proviennent principalement de sources francophones. `;
+   466→   466→   466→    userPrompt += `Voici des informations supplémentaires trouvées sur le web pour enrichir la revue :\n\n`;
+   467→   467→   467→    for (const item of webResearch) {
+   468→   468→   468→      userPrompt += `[${item.source || 'Web'}] ${item.title}\n`;
+   469→   469→   469→      userPrompt += `${(item.snippet || item.content || '').substring(0, 300)}\n\n`;
+   470→   470→   470→    }
+   471→   471→   471→  }
+   472→   472→   472→
+   473→   473→   473→  // Injecter le contexte mémoire éditoriale si disponible
+   474→   474→   474→  if (memoryContext) {
+   475→   475→   475→    userPrompt += `\n\n---\n\n${memoryContext}\n`;
+   476→   476→   476→  }
+   477→   477→   477→
+   478→   478→   478→  const result = await callAI(env, STAGE3_PROMPT, userPrompt, true, 'drafting');
+   479→   479→   479→  return { stage: 'drafting', content: result.content, provider: result.provider, duration: result.duration };
+   480→   480→   480→}
+   481→   481→   481→
+   482→   482→   482→/**
+   483→   483→   483→ * ÉTAPE 4 : Revue critique (auto-évaluation)
+   484→   484→   484→ */
+   485→   485→   485→export async function stage4_review(draft, articles, env) {
+   486→   486→   486→  const xml = buildArticlesXML(articles, 150); // 150 mots suffit pour vérifier les faits
+   487→   487→   487→  const userPrompt = `REVUE À ÉVALUER :\n\n${draft}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
+   488→   488→   488→  const result = await callAI(env, STAGE4_PROMPT, userPrompt, true, 'review');
+   489→   489→   489→  return { stage: 'review', content: result.content, provider: result.provider, duration: result.duration };
+   490→   490→   490→}
+   491→   491→   491→
+   492→   492→   492→/**
+   493→   493→   493→ * ÉTAPE 5 : Synthèse EIC (version finale)
+   494→   494→   494→ */
+   495→   495→   495→export async function stage5_synthesis(draft, review, articles, env) {
+   496→   496→   496→  const xml = buildArticlesXML(articles, 200);
+   497→   497→   497→
+   498→   498→   498→  const prompt1 = `BROUILLON À AMÉLIORER :\n\n${draft}\n\n---\n\nRAPPORT DE REVUE CRITIQUE :\n\n${review}\n\n---\n\nARTICLES SOURCES :\n${xml}`;
+   499→   499→   499→  const synthesisResult = await callAI(env, STAGE5_PROMPT, prompt1, true, 'synthesis');
+   500→   500→   500→
+   501→   501→   501→  return { stage: 'synthesis', content: synthesisResult.content, provider: synthesisResult.provider, duration: synthesisResult.duration };
+   502→   502→   502→}
+   503→   503→   503→
+   504→   504→   504→// ============================================================
+   505→   505→   505→// FAST REVIEW — Mode dégradé : 1 seul appel IA pour garantir l'email
+   506→   506→   506→// Utilise le même format éditorial mais condense extraction+thèmes+draft
+   507→   507→   507→// ============================================================
+   508→   508→   508→
+   509→   509→   509→const FAST_REVIEW_PROMPT = `${BASE_SYSTEM}
+   510→   510→   510→
+   511→   511→   511→## MISSION — REVUE DE PRESSE DIRECTE (mode rapide)
+   512→   512→   512→Tu reçois des articles bruts. Tu produis UNE SEULE revue de presse éditoriale complète.
+   513→   513→   513→Pas d'étape intermédiaire — tu extrais, thématise et rédiges en un seul passage.
+   514→   514→   514→
+   515→   515→   515→## FORMAT DE SORTIE (identique au mode CoT complet)
+   516→   516→   516→
+   517→   517→   517→**Sommaire**
+   518→   518→   518→
+   519→   519→   519→    [Titre de l'éditorial 1]
+   520→   520→   520→    [Titre de l'éditorial 2]
+   521→   521→   521→    [...]
+   522→   522→   522→
+   523→   523→   523→**1. [Titre éditorial 1 : sous-titre incisif]**
+   524→   524→   524→«\u00a0[Citation exacte d'un article]\u00a0» — [Source] (id="N"). [Contexte avec DATE].
+   525→   525→   525→
+   526→   526→   526→[2 paragraphes d'analyse, 3-5 phrases chacun, croisant 2+ sources.]
+   527→   527→   527→
+   528→   528→   528→---
+   529→   529→   529→Sources
+   530→   530→   530→
+   531→   531→   531→    «\u00a0[Titre exact]\u00a0» — [Source] — [URL] (id="N")
+   532→   532→   532→
+   533→   533→   533→**2. [Titre éditorial 2]**
+   534→   534→   534→[Même format]
+   535→   535→   535→
+   536→   536→   536→[...max 6 éditoriaux...]
+   537→   537→   537→
+   538→   538→   538→**Points de tension**
+   539→   539→   539→    1. **[Question ouverte]** [2-3 phrases]
+   540→   540→   540→    [...max 4...]
+   541→   541→   541→
+   542→   542→   542→**À surveiller**
+   543→   543→   543→    1. **[Événement]** [1-2 phrases]
+   544→   544→   544→    [...max 5...]
+   545→   545→   545→
+   546→   546→   546→## RÈGLES
+   547→   547→   547→- Max 6 éditoriaux (qualité > quantité en mode rapide)
+   548→   548→   548→- Même format éditorial analytique que le mode CoT complet
+   549→   549→   549→- Datage systématique, citations exactes, attribution (id="N")
+   550→   550→   550→- Ne RIEN inventer en dehors des articles fournis`;
+   551→   551→   551→
+   552→   552→   552→/**
+   553→   553→   553→ * Génère une revue complète en 1 seul appel IA (fallback garanti)
+   554→   554→   554→ * Si même ça échoue → fallback basé sur des règles (pas d'IA)
+   555→   555→   555→ */
+   556→   556→   556→export async function generateFastReview(articles, env, memoryContext = null) {
+   557→   557→   557→  // Limiter à 30 articles pour le mode rapide (garantit la vitesse)
+   558→   558→   558→  const subset = articles.length > 30 ? articles.slice(0, 30) : articles;
+   559→   559→   559→  const xml = buildArticlesXML(subset, 200);
+   560→   560→   560→
+   561→   561→   561→  let userPrompt = `Voici ${subset.length} articles. Rédige la revue de presse éditoriale complète :\n\n${xml}`;
+   562→   562→   562→  if (memoryContext) {
+   563→   563→   563→    userPrompt += `\n\n---\n\n${memoryContext}\n`;
+   564→   564→   564→  }
+   565→   565→   565→
+   566→   566→   566→  try {
+   567→   567→   567→    const result = await callAI(env, FAST_REVIEW_PROMPT, userPrompt, true, 'drafting');
+   568→   568→   568→    return { content: result.content, provider: result.provider, success: true, mode: 'fast' };
+   569→   569→   569→  } catch (err) {
+   570→   570→   570→    // Dernier recours : pas d'IA du tout
+   571→   571→   571→    console.error(`[FastReview] IA échouée: ${err.message}, fallback règles`);
+   572→   572→   572→    return {
+   573→   573→   573→      content: generateRuleBasedReview(articles),
+   574→   574→   574→      provider: 'rule-based',
+   575→   575→   575→      success: true,
+   576→   576→   576→      isFallback: true,
+   577→   577→   577→      lastError: err.message,
+   578→   578→   578→      mode: 'rule-based',
+   579→   579→   579→    };
+   580→   580→   580→  }
+   581→   581→   581→}
+   582→   582→   582→
+   583→   583→   583→// ============================================================
+   584→   584→   584→// TEST PROVIDERS — Diagnostic des providers IA disponibles
+   585→   585→   585→// ============================================================
+   586→   586→   586→
+   587→   587→   587→/**
+   588→   588→   588→ * Teste chaque provider IA avec un prompt minimal
+   589→   589→   589→ * Retourne les résultats pour diagnostic
+   590→   590→   590→ */
+   591→   591→   591→export async function testProviders(env) {
+   592→   592→   592→  const results = [];
+   593→   593→   593→  const testPrompt = 'Réponds uniquement par "OK" en français.';
+   594→   594→   594→  const testSystem = 'Tu es un assistant de test.';
+   595→   595→   595→
+   596→   596→   596→  // Test Groq
+   597→   597→   597→  if (env.GROQ_API_KEY) {
+   598→   598→   598→    const start = Date.now();
+   599→   599→   599→    try {
+   600→   600→   600→      const resp = await callOpenAICompatible(
+   601→   601→   601→        GROQ_ENDPOINT, 'llama-3.3-70b-versatile', env.GROQ_API_KEY,
+   602→   602→   602→        testSystem, testPrompt, 50
+   603→   603→   603→      );
+   604→   604→   604→      results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+   605→   605→   605→    } catch (err) {
+   606→   606→   606→      results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+   607→   607→   607→    }
+   608→   608→   608→  } else {
+   609→   609→   609→    results.push({ provider: 'groq', model: 'llama-3.3-70b-versatile', ok: false, error: 'GROQ_API_KEY non configurée' });
+   610→   610→   610→  }
+   611→   611→   611→
+   612→   612→   612→  // Test Gemini
+   613→   613→   613→  if (env.GEMINI_API_KEY) {
+   614→   614→   614→    const start = Date.now();
+   615→   615→   615→    try {
+   616→   616→   616→      const resp = await callGemini(env.GEMINI_API_KEY, testSystem, testPrompt, 50);
+   617→   617→   617→      results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+   618→   618→   618→    } catch (err) {
+   619→   619→   619→      results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+   620→   620→   620→    }
+   621→   621→   621→  } else {
+   622→   622→   622→    results.push({ provider: 'gemini', model: 'gemini-2.0-flash', ok: false, error: 'GEMINI_API_KEY non configurée' });
+   623→   623→   623→  }
+   624→   624→   624→
+   625→   625→   625→  // Test Mistral medium
+   626→   626→   626→  if (env.MISTRAL_API_KEY) {
+   627→   627→   627→    const start = Date.now();
+   628→   628→   628→    try {
+   629→   629→   629→      const resp = await callOpenAICompatible(
+   630→   630→   630→        MISTRAL_ENDPOINT, 'mistral-medium-latest', env.MISTRAL_API_KEY,
+   631→   631→   631→        testSystem, testPrompt, 50
+   632→   632→   632→      );
+   633→   633→   633→      results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: true, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+   634→   634→   634→    } catch (err) {
+   635→   635→   635→      results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+   636→   636→   636→    }
+   637→   637→   637→  } else {
+   638→   638→   638→    results.push({ provider: 'mistral', model: 'mistral-medium-latest', ok: false, error: 'MISTRAL_API_KEY non configurée' });
+   639→   639→   639→  }
+   640→   640→   640→
+   641→   641→   641→  // Test Workers AI
+   642→   642→   642→  if (env.AI) {
+   643→   643→   643→    const start = Date.now();
+   644→   644→   644→    try {
+   645→   645→   645→      const r = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { prompt: `${testSystem}\n${testPrompt}`, max_tokens: 50, temperature: 0.2 });
+   646→   646→   646→      const resp = r.response || '';
+   647→   647→   647→      results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: resp.length > 0, response: resp.trim().substring(0, 50), latency: Date.now() - start });
+   648→   648→   648→    } catch (err) {
+   649→   649→   649→      results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: false, error: err.message.substring(0, 150), latency: Date.now() - start });
+   650→   650→   650→    }
+   651→   651→   651→  } else {
+   652→   652→   652→    results.push({ provider: 'workersai', model: 'llama-4-scout-17b-16e-instruct', ok: false, error: 'AI binding non configurée' });
+   653→   653→   653→  }
+   654→   654→   654→
+   655→   655→   655→  return results;
+   656→   656→   656→}
+   657→   657→   657→
+   658→   658→   658→// ============================================================
+   659→   659→   659→// Fallback basé sur des règles (dernier recours absolu)
+   660→   660→   660→// ============================================================
+   661→   661→   661→function generateRuleBasedReview(articles) {
+   662→   662→   662→  const lines = [];
+   663→   663→   663→  lines.push('📌 **L\'ESSENTIEL DU JOUR**\n');
+   664→   664→   664→  const headlines = articles.slice(0, 5);
+   665→   665→   665→  for (const a of headlines) {
+   666→   666→   666→    const desc = (a.description || '').replace(/<[^>]*>/g, '').substring(0, 120);
+   667→   667→   667→    lines.push(`**${a.title}** — *${a.sourceName}*${desc ? ` : ${desc}` : ''}`);
+   668→   668→   668→  }
+   669→   669→   669→  lines.push('\n---\n');
+   670→   670→   670→  lines.push('📰 **ANALYSE THÉMATIQUE**\n');
+   671→   671→   671→  const grouped = {};
+   672→   672→   672→  for (const a of articles) {
+   673→   673→   673→    const cat = a.sourceCategory || 'Autre';
+   674→   674→   674→    if (!grouped[cat]) grouped[cat] = [];
+   675→   675→   675→    grouped[cat].push(a);
+   676→   676→   676→  }
+   677→   677→   677→  for (const [cat, items] of Object.entries(grouped)) {
+   678→   678→   678→    lines.push(`**[${cat}]**`);
+   679→   679→   679→    for (const a of items) {
+   680→   680→   680→      const desc = (a.description || '').replace(/<[^>]*>/g, '').substring(0, 150);
+   681→   681→   681→      lines.push(`- **${a.title}** (*${a.sourceName}*): ${desc}...`);
+   682→   682→   682→    }
+   683→   683→   683→    lines.push('');
+   684→   684→   684→  }
+   685→   685→   685→  lines.push('---\n');
+   686→   686→   686→  lines.push('⚠️ *Mode dégradé — IA indisponible*');
+   687→   687→   687→  return lines.join('\n');
+   688→   688→   688→}
