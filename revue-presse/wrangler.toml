@@ -12,10 +12,32 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["0 6 * * 1-5"]
 
-# === KV Namespace (bus inter-phases) ===
+# === KV Namespace (bus inter-phases + mémoire éditoriale) ===
 [[kv_namespaces]]
 binding = "CACHE"
 id = "ef1ef185628f45d9bc6f9d5c209b0efe"
+
+# === D1 Database (mémoire documentaire épistémique) ===
+# ⚠️ À créer avec : npx wrangler d1 create revue-presse-db
+# puis remplacer <DATABASE_ID> par l'ID retourné
+[[d1_databases]]
+binding = "DB"
+database_name = "revue-presse-db"
+database_id = "<DATABASE_ID>"
+
+# === Vectorize (recherche sémantique — optionnel) ===
+# ⚠️ À créer avec : npx wrangler vectorize create revue-presse-memory --dimensions=384 --metric=cosine
+# puis remplacer <INDEX_ID> par l'ID retourné
+# [[vectorize]]
+# binding = "VECTORIZE"
+# index_name = "revue-presse-memory"
+# index_id = "<INDEX_ID>"
+
+# === R2 Bucket (stockage fichiers originaux — optionnel) ===
+# ⚠️ À créer avec : npx wrangler r2 bucket create revue-presse-docs
+# [[r2_buckets]]
+# binding = "DOCS_BUCKET"
+# bucket_name = "revue-presse-docs"
 
 # === Variables d'environnement ===
 [vars]
@@ -26,6 +48,6 @@ MAX_WORDS_PER_ARTICLE = "1500"
 AI_PROVIDER = "auto"
 PUBLIC_URL = "https://revue-presse.jeanneaj.workers.dev"
 
-# === Workers AI (fallback natif) ===
+# === Workers AI (fallback natif + embeddings) ===
 [ai]
 binding = "AI"

@@ -1,7 +1,8 @@
 // ============================================================
-// index.js — Point d'entrée Cloudflare Worker v3.5.0
+// index.js — Point d'entrée Cloudflare Worker v4.0.0
 // Pipeline résilient : CoT complet → fallback rapide → règles
 // Providers : Groq → Gemini → Mistral → Workers AI
+// Mémoire documentaire épistémique scientifique (D1 + Vectorize + R2)
 // Garantie d'email quotidien même si tous les providers IA échouent
 // ============================================================
 
@@ -12,8 +13,12 @@ import {
 } from './pipeline.js';
 import { getMemoryStats, dreamDistill } from './memory.js';
 import { testProviders } from './ai.js';
+import {
+  ingestDocument, ingestFromURL, searchClaims, listDocuments,
+  getDocumentDetail, getDocMemoryStats, deleteDocument, updateClaimStatus,
+} from './docmemory.js';
 
-const VERSION = '3.5.0';
+const VERSION = '4.0.0';
 
 // ============================================================
 // CRON SCHEDULER — Pipeline résilient avec fallbacks en cascade
@@ -119,7 +124,7 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, {
-        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' },
+        headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' },
       });
     }
 
@@ -227,6 +232,76 @@ export default {
         return new Response(JSON.stringify({ ok: true, feedbackCount: feedbacks.length }), { headers: cors });
       }
 
+      // === ROUTES MÉMOIRE DOCUMENTAIRE (v4.0) ===
+
+      // POST /memory/ingest — Ingestion par contenu texte
+      if (path === '/memory/ingest' && request.method === 'POST') {
+        const body = await request.json();
+        const result = await ingestDocument(env, body);
+        const status = result.error ? 400 : 200;
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { status, headers: cors });
+      }
+
+      // POST /memory/ingest/url — Ingestion depuis URL
+      if (path === '/memory/ingest/url' && request.method === 'POST') {
+        const body = await request.json();
+        const result = await ingestFromURL(env, body);
+        const status = result.error ? 400 : 200;
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { status, headers: cors });
+      }
+
+      // GET /memory/documents — Lister les documents
+      if (path === '/memory/documents' && request.method === 'GET') {
+        const type = url.searchParams.get('type');
+        const result = await listDocuments(env, { type });
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { headers: cors });
+      }
+
+      // GET /memory/documents/:id — Détail d'un document
+      const docDetailMatch = path.match(/^\/memory\/documents\/([a-z0-9_]+)$/);
+      if (docDetailMatch && request.method === 'GET') {
+        const result = await getDocumentDetail(env, docDetailMatch[1]);
+        if (!result || result.error) {
+          return new Response(JSON.stringify({ error: 'Document non trouvé', version: VERSION }), { status: 404, headers: cors });
+        }
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { headers: cors });
+      }
+
+      // DELETE /memory/documents/:id — Supprimer un document
+      if (docDetailMatch && request.method === 'DELETE') {
+        const result = await deleteDocument(env, docDetailMatch[1]);
+        const status = result.error ? 400 : 200;
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { status, headers: cors });
+      }
+
+      // GET /memory/search — Recherche dans les claims
+      if (path === '/memory/search' && request.method === 'GET') {
+        const result = await searchClaims(env, {
+          query: url.searchParams.get('q'),
+          topic: url.searchParams.get('topic'),
+          status: url.searchParams.get('status'),
+          type: url.searchParams.get('type'),
+          stance: url.searchParams.get('stance'),
+          limit: parseInt(url.searchParams.get('limit')) || 10,
+        });
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { headers: cors });
+      }
+
+      // GET /memory/doc-stats — Statistiques mémoire documentaire
+      if (path === '/memory/doc-stats' && request.method === 'GET') {
+        const result = await getDocMemoryStats(env);
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { headers: cors });
+      }
+
+      // PATCH /memory/claims/:id/status — Mise à jour manuelle du statut épistémique
+      const claimStatusMatch = path.match(/^\/memory\/claims\/([a-z0-9_]+)\/status$/);
+      if (claimStatusMatch && request.method === 'PATCH') {
+        const body = await request.json();
+        const result = await updateClaimStatus(env, claimStatusMatch[1], body.status, body.reason);
+        const status = result.error ? 400 : 200;
+        return new Response(JSON.stringify({ version: VERSION, ...result }), { status, headers: cors });
+      }
+
       // 404
       return new Response(JSON.stringify({
         error: 'Route non trouvée',
@@ -245,7 +320,15 @@ export default {
           'POST /trigger/deliver': 'Phase 8 — Envoi email',
           'POST /trigger/fast_fallback': 'Mode dégradé (1 appel IA)',
           'POST /trigger/all': 'Pipeline complet (avec fallback auto)',
-          'GET /memory/stats': 'Statistiques mémoire',
+          'GET /memory/stats': 'Statistiques mémoire éditoriale',
+          'GET /memory/doc-stats': 'Statistiques mémoire documentaire',
+          'POST /memory/ingest': 'Ingérer un document (JSON: title, content, doc_type, date)',
+          'POST /memory/ingest/url': 'Ingérer depuis URL (JSON: url, title?, doc_type?)',
+          'GET /memory/documents': 'Liste des documents ingérés (?type=)',
+          'GET /memory/documents/:id': 'Détail document + claims',
+          'DELETE /memory/documents/:id': 'Supprimer un document',
+          'GET /memory/search': 'Recherche claims (?q=, ?topic=, ?status=)',
+          'PATCH /memory/claims/:id/status': 'Modifier statut épistémique',
           'POST /trigger/dream': 'Distillation IA',
           'POST /feedback': 'Feedback {date, type, comment}',
         },

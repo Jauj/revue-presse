@@ -11,6 +11,7 @@ import { stage1_extract, stage2_theme, stage3_draft, stage4_review, stage5_synth
 import { webSearchMultiLang } from './searcher.js';
 import { buildEmailHTML, buildEmailText, buildSubject, sendEmail } from './email.js';
 import { saveDailyMemory, updateSemanticMemory, updateNarratives, getMemoryContext, dreamDistill, saveQualityScore } from './memory.js';
+import { getDocMemoryContext, crossReferenceWithPressReview, generateProspective } from './docmemory.js';
 
 // Clés KV pour le bus inter-phases
 const KV_RAW_ARTICLES = 'pipeline:raw_articles';      // après FETCH (brut, non dédupliqué)
@@ -302,10 +303,35 @@ export async function phaseDraft(env, eventTime) {
     try {
       memoryContext = await getMemoryContext(env, 7);
       if (memoryContext) {
-        console.log(`[Phase Draft] Mémoire injectée (${memoryContext.length} chars)`);
+        console.log(`[Phase Draft] Mémoire éditoriale injectée (${memoryContext.length} chars)`);
       }
     } catch (err) {
-      console.warn(`[Phase Draft] Mémoire indisponible: ${err.message}`);
+      console.warn(`[Phase Draft] Mémoire éditoriale indisponible: ${err.message}`);
+    }
+
+    // === MÉMOIRE DOCUMENTAIRE : récupérer les claims pertinents pour les thèmes du jour ===
+    try {
+      // Extraire les thèmes du XML de thématisation pour la recherche documentaire
+      const themeNames = [];
+      const themeMatches = themes.matchAll(/<name>(.*?)<\/name>/g);
+      for (const match of themeMatches) {
+        const name = match[1].trim();
+        if (name.length > 2) themeNames.push(name);
+      }
+
+      if (themeNames.length > 0) {
+        const docContext = await getDocMemoryContext(env, themeNames, 8);
+        if (docContext) {
+          console.log(`[Phase Draft] Mémoire documentaire injectée (${docContext.length} chars)`);
+          if (memoryContext) {
+            memoryContext += docContext;
+          } else {
+            memoryContext = docContext;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Phase Draft] Mémoire documentaire indisponible: ${err.message}`);
     }
 
     status.step = 'ai_draft';
@@ -408,6 +434,22 @@ export async function phaseSynthesis(env, eventTime) {
       const scoreMatch = review.match(/<score_global>(\d+(?:\.\d+)?)<\/score_global>/);
       if (scoreMatch) {
         await saveQualityScore(env, dateStr, parseFloat(scoreMatch[1]), result.content);
+      }
+
+      // === MÉMOIRE DOCUMENTAIRE : cross-référence avec les claims existants ===
+      try {
+        const themeNames = [];
+        const tmMatch = result.content.matchAll(/^\*\*(\d+)\.\s*(.+?)(?:\s*[:：]\s*(.+?))?\*\*$/gm);
+        for (const match of tmMatch) {
+          if (match[2].length > 3) themeNames.push(match[2]);
+        }
+        if (themeNames.length > 0) {
+          const crossRefResult = await crossReferenceWithPressReview(env, result.content, themeNames, eventTime);
+          status.docMemoryCrossRef = crossRefResult;
+          console.log(`[Phase Synthesis] Cross-référence doc: ${crossRefResult.updated} claims mis à jour`);
+        }
+      } catch (docErr) {
+        console.warn(`[Phase Synthesis] Cross-référence doc échouée (non bloquante): ${docErr.message}`);
       }
 
       status.memorySaved = true;
@@ -552,13 +594,26 @@ export async function backgroundMemorySave(env, eventTime) {
     await updateSemanticMemory(env, dailyMemory);
     await updateNarratives(env, dailyMemory);
 
-    // Rêve le vendredi
+    // Rêve le vendredi (ou cross-référence documentaire quotidien)
     const dayOfWeek = eventTime.getDay();
     if (dayOfWeek === 5) {
+      // Dream avec mémoire documentaire intégrée
+      const docContext = await getDocMemoryContext(env, dailyMemory.themes, 5);
+      if (docContext) {
+        console.log(`[BackgroundMemory] Mémoire doc disponible pour le rêve`);
+      }
+      // Prospective scientifique (si documents ingérés)
+      const prospective = await generateProspective(env, 30);
+      if (prospective) {
+        console.log(`[BackgroundMemory] Prospective générée: ${prospective.trends?.length || 0} tendances`);
+        // Stocker la prospective en KV pour injection dans le prochain rêve
+        await env.CACHE.put('memory:prospective', JSON.stringify({
+          ...prospective,
+          generatedAt: new Date().toISOString(),
+        }), { expirationTtl: 30 * 24 * 3600 });
+      }
       await dreamDistill(env, 14, false);
     }
-
-    console.log(`[BackgroundMemory] Sauvegardé: ${dailyMemory.themes.length} thèmes`);
   } catch (err) {
     console.warn(`[BackgroundMemory] Erreur: ${err.message}`);
   }
